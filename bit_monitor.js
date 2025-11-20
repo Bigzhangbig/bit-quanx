@@ -31,7 +31,11 @@ const CONFIG = {
     statusMap: {
         1: "未开始",
         2: "进行中"
-    }
+    },
+    // 报名接口
+    applyUrl: "https://qcbldekt.bit.edu.cn/api/course/apply",
+    // 固定的 Template ID
+    templateId: "2GNFjVv2S7xYnoWeIxGsJGP1Fu2zSs28R6mZI7Fc2kU"
 };
 
 // 脚本入口
@@ -77,6 +81,10 @@ async function checkCourses() {
     let notifyMsg = "";
     let hasUpdate = false;
     let isTokenExpired = false;
+    
+    // 统计数据
+    let totalFetchedCount = 0;
+    let unstartedCount = 0;
 
     // 遍历所有栏目
     for (let cat of CONFIG.categories) {
@@ -104,6 +112,8 @@ async function checkCourses() {
 
                 if (data && data.code === 200 && data.data && data.data.items && data.data.items.length > 0) {
                     const courses = data.data.items;
+                    totalFetchedCount += courses.length;
+                    
                     if (isDebug) {
                         // 打印新获取到的数据摘要
                         const itemsSummary = courses.map(c => ({id: c.id, title: c.title}));
@@ -112,6 +122,8 @@ async function checkCourses() {
 
                     // 遍历返回的课程
                     for (let course of courses) {
+                        if (status === 1) unstartedCount++;
+
                         // 如果课程ID大于缓存的ID，则是新课程
                         if (course.id > (cache[cat.id] || 0)) {
                             
@@ -122,10 +134,17 @@ async function checkCourses() {
                             if (filterCollege !== "不限") {
                                 const collegeList = course.college || [];
                                 const department = course.department || "";
-                                // 如果课程有明确的学院限制（列表不为空），则检查是否匹配；否则（列表为空）视为不限，直接通过
-                                if (collegeList.length > 0 || department) {
-                                    const matchCollege = collegeList.some(c => c.includes(filterCollege)) || department.includes(filterCollege);
-                                    if (!matchCollege) isMatch = false;
+                                
+                                // 匹配规则：
+                                // 1. 课程未限制学院 (collegeList为空) -> 匹配
+                                // 2. 课程限制列表中包含选中学院 -> 匹配
+                                // 3. 课程主办方(department)包含选中学院 -> 匹配
+                                const isUnlimited = collegeList.length === 0;
+                                const isTargeted = collegeList.some(c => c.includes(filterCollege));
+                                const isOrganizer = department.includes(filterCollege);
+
+                                if (!isUnlimited && !isTargeted && !isOrganizer) {
+                                    isMatch = false;
                                 }
                             }
 
@@ -161,6 +180,23 @@ async function checkCourses() {
                                 if (status === 1) {
                                     $.setdata(course.id.toString(), CONFIG.signupCourseIdKey);
                                     notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${title}\n⏰ 报名时间: ${signTime}\n📍 ${place}\n🎯 已自动设置报名ID: ${course.id}\n\n`;
+                                } else if (status === 2) {
+                                    // 进行中的课程，尝试自动报名
+                                    let signupResultMsg = "";
+                                    // 假设字段 is_sign, 1为已报名
+                                    if (!course.is_sign) {
+                                        console.log(`[Monitor] 尝试自动报名进行中的课程: ${title}`);
+                                        const signupRes = await autoSignup(course.id, token, headers);
+                                        if (signupRes.success) {
+                                            signupResultMsg = `\n✅ 自动报名成功: ${signupRes.message}`;
+                                        } else {
+                                            signupResultMsg = `\n❌ 自动报名失败: ${signupRes.message}`;
+                                        }
+                                    } else {
+                                        signupResultMsg = `\n⚠️ 已报名，跳过`;
+                                    }
+                                    
+                                    notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${title}\n⏰ 报名时间: ${signTime}\n📍 ${place}${signupResultMsg}\n\n`;
                                 } else {
                                     notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${title}\n⏰ 报名时间: ${signTime}\n📍 ${place}\n\n`;
                                 }
@@ -192,26 +228,80 @@ async function checkCourses() {
         cache[cat.id] = maxIdInThisLoop;
     }
 
+    // 默认跳转链接
+    let openUrl = "weixin://dl/business/?t=34E4TP288tr";
+
     if (isTokenExpired) {
-        $.msg($.name, "⚠️ Token 已失效", "请重新进入小程序刷新列表获取新的 Token");
+        $.msg($.name, "⚠️ Token 已失效", "请重新进入小程序刷新列表获取新的 Token", { "open-url": openUrl });
         $done();
         return;
     }
 
     // 如果有更新，发送通知并保存新缓存
     if (hasUpdate) {
-        // 尝试获取跳转链接 (虽然目前测试似乎返回固定链接，但保留逻辑以防万一)
-        // 默认跳转链接
-        let openUrl = "weixin://dl/business/?t=34E4TP288tr";
-        
         $.msg($.name, "发现新课程活动！", notifyMsg, { "open-url": openUrl });
         $.setdata(JSON.stringify(cache), CONFIG.cacheKey);
     } else {
-        if (isDebug) console.log(`[Debug] 暂无新课程更新`);
-        console.log("暂无新课程更新");
+        if (isDebug) {
+            $.msg($.name + " [Debug]", "监控运行完成", `共获取课程: ${totalFetchedCount}\n未开始课程: ${unstartedCount}\n暂无新课程`, { "open-url": openUrl });
+            console.log(`[Debug] 暂无新课程更新`);
+        } else {
+            console.log("暂无新课程更新");
+        }
     }
     
     $done();
+}
+
+// 自动报名函数
+async function autoSignup(courseId, token, headers) {
+    // 复制 headers 并移除 Content-Length
+    const reqHeaders = JSON.parse(JSON.stringify(headers));
+    delete reqHeaders['Content-Length'];
+    reqHeaders['Host'] = 'qcbldekt.bit.edu.cn';
+
+    const body = {
+        course_id: parseInt(courseId),
+        template_id: CONFIG.templateId
+    };
+
+    const options = {
+        url: CONFIG.applyUrl,
+        headers: reqHeaders,
+        body: JSON.stringify(body),
+        method: "POST"
+    };
+
+    try {
+        const result = await httpPost(options);
+        console.log(`[AutoSignup] 课程 ${courseId} 报名结果: ${JSON.stringify(result)}`);
+        
+        if (result.code === 200 || (result.message && result.message.includes("成功"))) {
+            return { success: true, message: result.message || "报名成功" };
+        } else {
+            return { success: false, message: result.message || "未知错误" };
+        }
+    } catch (e) {
+        console.log(`[AutoSignup] 异常: ${e}`);
+        return { success: false, message: `请求异常: ${e}` };
+    }
+}
+
+function httpPost(options) {
+    return new Promise((resolve, reject) => {
+        $.post(options, (err, resp, data) => {
+            if (err) {
+                reject(err);
+            } else {
+                try {
+                    const res = JSON.parse(data);
+                    resolve(res);
+                } catch (e) {
+                    resolve(data);
+                }
+            }
+        });
+    });
 }
 
 // 封装请求
