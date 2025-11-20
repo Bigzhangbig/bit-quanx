@@ -17,6 +17,7 @@ const CONFIG = {
     filterCollegeKey: "bit_sc_filter_college",
     filterGradeKey: "bit_sc_filter_grade",
     filterTypeKey: "bit_sc_filter_type",
+    signupCourseIdKey: "bit_sc_signup_course_id", // 报名课程ID Key
     
     // 栏目ID映射 (根据你的截图推断)
     categories: [
@@ -154,7 +155,13 @@ async function checkCourses() {
                                 
                                 if (isDebug) console.log(`[Debug] 发现新课程(匹配成功): ${title} (ID: ${course.id})`);
 
-                                notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${title}\n⏰ 报名时间: ${signTime}\n📍 ${place}\n\n`;
+                                // 自动设置报名ID (如果是未开始的课程)
+                                if (status === 1) {
+                                    $.setdata(course.id.toString(), CONFIG.signupCourseIdKey);
+                                    notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${title}\n⏰ 报名时间: ${signTime}\n📍 ${place}\n🎯 已自动设置报名ID: ${course.id}\n\n`;
+                                } else {
+                                    notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${title}\n⏰ 报名时间: ${signTime}\n📍 ${place}\n\n`;
+                                }
                             } else {
                                 if (isDebug) console.log(`[Debug] 发现新课程(被筛选过滤): ${course.title} (ID: ${course.id})`);
                             }
@@ -191,7 +198,11 @@ async function checkCourses() {
 
     // 如果有更新，发送通知并保存新缓存
     if (hasUpdate) {
-        $.msg($.name, "发现新课程活动！", notifyMsg);
+        // 尝试获取跳转链接 (虽然目前测试似乎返回固定链接，但保留逻辑以防万一)
+        // 默认跳转链接
+        let openUrl = "weixin://dl/business/?t=34E4TP288tr";
+        
+        $.msg($.name, "发现新课程活动！", notifyMsg, { "open-url": openUrl });
         $.setdata(JSON.stringify(cache), CONFIG.cacheKey);
     } else {
         if (isDebug) console.log(`[Debug] 暂无新课程更新`);
