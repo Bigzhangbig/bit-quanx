@@ -13,6 +13,10 @@ const CONFIG = {
     tokenKey: "bit_sc_token",
     headersKey: "bit_sc_headers",
     cacheKey: "bit_sc_cache", // 用来存上一次的最新课程ID
+    debugKey: "bit_sc_debug", // 调试模式开关
+    filterCollegeKey: "bit_sc_filter_college",
+    filterGradeKey: "bit_sc_filter_grade",
+    filterTypeKey: "bit_sc_filter_type",
     
     // 栏目ID映射 (根据你的截图推断)
     categories: [
@@ -38,7 +42,18 @@ const CONFIG = {
 async function checkCourses() {
     const token = $.getdata(CONFIG.tokenKey);
     const savedHeaders = $.getdata(CONFIG.headersKey);
+    const isDebug = $.getdata(CONFIG.debugKey) === "true";
     
+    // 获取筛选配置
+    const filterCollege = $.getdata(CONFIG.filterCollegeKey) || "不限";
+    const filterGrade = $.getdata(CONFIG.filterGradeKey) || "不限";
+    const filterType = $.getdata(CONFIG.filterTypeKey) || "不限";
+
+    if (isDebug) {
+        console.log(`[Debug] 开始运行监控脚本`);
+        console.log(`[Debug] 筛选条件: 学院[${filterCollege}], 年级[${filterGrade}], 类型[${filterType}]`);
+    }
+
     if (!token) {
         $.msg($.name, "❌ 未找到 Token", "请先运行 bit_cookie.js 脚本，并进入微信小程序“第二课堂”刷新任意列表以获取 Token。");
         $done();
@@ -48,13 +63,16 @@ async function checkCourses() {
     const headers = JSON.parse(savedHeaders || "{}");
     headers['Authorization'] = token;
     headers['Content-Type'] = 'application/json;charset=utf-8';
-    // 确保包含 Accept-Encoding 以支持 gzip 解密
     if (!headers['Accept-Encoding']) {
         headers['Accept-Encoding'] = 'gzip, deflate, br';
     }
 
     // 读取上一次的缓存数据
     let cache = JSON.parse($.getdata(CONFIG.cacheKey) || "{}");
+    if (isDebug) {
+        console.log(`[Debug] 本地缓存(上次最新ID): ${JSON.stringify(cache)}`);
+    }
+
     let notifyMsg = "";
     let hasUpdate = false;
     let isTokenExpired = false;
@@ -68,25 +86,72 @@ async function checkCourses() {
             const url = `https://qcbldekt.bit.edu.cn/api/course/list?page=1&limit=5&sign_status=${status}&transcript_index_id=${cat.id}&transcript_index_type_id=0`;
             
             try {
+                if (isDebug) console.log(`[Debug] 请求: ${cat.name} (状态${status})`);
                 const data = await httpGet(url, headers);
                 
                 // 检查 Token 是否失效
                 if (data && (data.code === 401 || data.message === "Unauthenticated.")) {
                     isTokenExpired = true;
+                    if (isDebug) console.log(`[Debug] Token 失效: ${JSON.stringify(data)}`);
                     break;
                 }
 
                 if (data && data.code === 200 && data.data && data.data.length > 0) {
+                    if (isDebug) {
+                        // 打印新获取到的数据摘要
+                        const itemsSummary = data.data.map(c => ({id: c.id, title: c.title}));
+                        console.log(`[Debug] ${cat.name}(${status}) 获取到 ${data.data.length} 条数据: ${JSON.stringify(itemsSummary)}`);
+                    }
+
                     // 遍历返回的课程
                     for (let course of data.data) {
                         // 如果课程ID大于缓存的ID，则是新课程
                         if (course.id > (cache[cat.id] || 0)) {
-                            hasUpdate = true;
-                            const time = course.sign_in_start_time || "未知时间";
-                            const place = course.time_place ? course.time_place.replace(/\n/g, " ") : "未知地点";
-                            const statusStr = CONFIG.statusMap[status];
                             
-                            notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${course.transcript_name}\n⏰ ${time}\n📍 ${place}\n\n`;
+                            // --- 筛选逻辑 ---
+                            let isMatch = true;
+
+                            // 1. 学院筛选
+                            if (filterCollege !== "不限") {
+                                const collegeList = course.college || [];
+                                const department = course.department || "";
+                                // 检查 college 数组是否包含 OR department 字符串是否包含
+                                const matchCollege = collegeList.some(c => c.includes(filterCollege)) || department.includes(filterCollege);
+                                if (!matchCollege) isMatch = false;
+                            }
+
+                            // 2. 年级筛选 (例如 "2025级" -> 2025)
+                            if (isMatch && filterGrade !== "不限") {
+                                const targetGrade = parseInt(filterGrade.replace("级", ""));
+                                const gradeList = course.grade || [];
+                                // 如果 gradeList 为空，通常表示不限年级，视为匹配；如果不为空，则需包含目标年级
+                                if (gradeList.length > 0 && !gradeList.includes(targetGrade)) {
+                                    isMatch = false;
+                                }
+                            }
+
+                            // 3. 类型筛选 (例如 "本科生")
+                            if (isMatch && filterType !== "不限") {
+                                const typeList = course.student_type || [];
+                                // 如果 typeList 为空，通常表示不限类型，视为匹配
+                                if (typeList.length > 0 && !typeList.includes(filterType)) {
+                                    isMatch = false;
+                                }
+                            }
+
+                            if (isMatch) {
+                                hasUpdate = true;
+                                const title = course.title || course.transcript_name || "未知名称";
+                                const signTime = course.sign_start_time || "未知";
+                                const place = course.time_place ? course.time_place.replace(/\n/g, " ") : "未知地点";
+                                const statusStr = CONFIG.statusMap[status];
+                                
+                                if (isDebug) console.log(`[Debug] 发现新课程(匹配成功): ${title} (ID: ${course.id})`);
+
+                                notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${title}\n⏰ 报名时间: ${signTime}\n📍 ${place}\n\n`;
+                            } else {
+                                if (isDebug) console.log(`[Debug] 发现新课程(被筛选过滤): ${course.title} (ID: ${course.id})`);
+                            }
                             
                             // 更新当前循环发现的最大ID
                             if (course.id > maxIdInThisLoop) {
@@ -123,6 +188,7 @@ async function checkCourses() {
         $.msg($.name, "发现新课程活动！", notifyMsg);
         $.setdata(JSON.stringify(cache), CONFIG.cacheKey);
     } else {
+        if (isDebug) console.log(`[Debug] 暂无新课程更新`);
         console.log("暂无新课程更新");
     }
     

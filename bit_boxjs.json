@@ -1,0 +1,90 @@
+{
+  "id": "bit_dekt_quanx",
+  "name": "北理工第二课堂助手",
+  "author": "@Bigzhangbig",
+  "icon": "https://avatars.githubusercontent.com/u/78358414",
+  "repo": "https://github.com/Bigzhangbig/bit-dekt-quanx",
+  "apps": [
+    {
+      "id": "bit_dekt",
+      "name": "北理工第二课堂",
+      "keys": [
+        "bit_sc_token",
+        "bit_sc_headers",
+        "bit_sc_cache",
+        "bit_sc_debug"
+      ],
+      "descs_html": [
+        "请先在 Quantumult X 中添加重写规则获取 Token。",
+        "脚本会自动监控第二课堂的新活动并发送通知。"
+      ],
+      "settings": [
+        {
+          "id": "bit_sc_debug",
+          "name": "开启调试日志",
+          "val": false,
+          "type": "boolean",
+          "desc": "开启后会在日志中打印详细的请求和响应信息，用于排查问题"
+        },
+        {
+          "id": "bit_sc_filter_college",
+          "name": "学院筛选",
+          "val": "不限",
+          "type": "select",
+          "items": [
+            { "key": "不限", "label": "不限" },
+            { "key": "特立书院", "label": "特立书院" },
+            { "key": "北京书院", "label": "北京书院" },
+            { "key": "明德书院", "label": "明德书院" },
+            { "key": "求是书院", "label": "求是书院" },
+            { "key": "精工书院", "label": "精工书院" },
+            { "key": "睿信书院", "label": "睿信书院" },
+            { "key": "徐特立学院", "label": "徐特立学院" },
+            { "key": "未来精工技术学院", "label": "未来精工技术学院" }
+          ],
+          "desc": "仅通知包含选中学院的课程（模糊匹配）"
+        },
+        {
+          "id": "bit_sc_filter_grade",
+          "name": "年级筛选",
+          "val": "不限",
+          "type": "select",
+          "items": [
+            { "key": "不限", "label": "不限" },
+            { "key": "2025级", "label": "2025级" },
+            { "key": "2024级", "label": "2024级" },
+            { "key": "2023级", "label": "2023级" },
+            { "key": "2022级", "label": "2022级" }
+          ],
+          "desc": "仅通知包含选中年级的课程"
+        },
+        {
+          "id": "bit_sc_filter_type",
+          "name": "类型筛选",
+          "val": "不限",
+          "type": "select",
+          "items": [
+            { "key": "不限", "label": "不限" },
+            { "key": "本科生", "label": "本科生" },
+            { "key": "研究生", "label": "研究生" }
+          ],
+          "desc": "仅通知包含选中类型的课程"
+        },
+        {
+            "id": "bit_sc_token",
+            "name": "Token (自动获取)",
+            "val": "",
+            "type": "text",
+            "desc": "无需手动填写，请通过重写获取",
+            "disabled": true
+        }
+      ],
+      "author": "@Bigzhangbig",
+      "repo": "https://github.com/Bigzhangbig/bit-dekt-quanx",
+      "icons": [
+        "https://avatars.githubusercontent.com/u/78358414",
+        "https://avatars.githubusercontent.com/u/78358414"
+      ]
+    }
+  ]
+}

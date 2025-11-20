@@ -13,7 +13,8 @@ const $ = new Env("北理工第二课堂-获取Token");
 
 const CONFIG = {
     tokenKey: "bit_sc_token",
-    headersKey: "bit_sc_headers"
+    headersKey: "bit_sc_headers",
+    debugKey: "bit_sc_debug"
 };
 
 (async () => {
@@ -24,15 +25,17 @@ const CONFIG = {
 })();
 
 async function getCookie() {
+    const isDebug = $.getdata(CONFIG.debugKey) === "true";
+    
     // 调试日志，可以在 QX 日志中查看是否触发
-    console.log(`[${$.name}] 检测到请求: ${$request.url}`);
+    if (isDebug) console.log(`[${$.name}] 检测到请求: ${$request.url}`);
     
     if ($request.headers) {
         const auth = $request.headers['Authorization'] || $request.headers['authorization'];
         const referer = $request.headers['Referer'] || $request.headers['referer'];
 
         // 打印头部信息以便调试
-        // console.log(`Auth: ${auth ? '存在' : '缺失'}, Referer: ${referer ? '存在' : '缺失'}`);
+        if (isDebug) console.log(`[Debug] Auth: ${auth ? '存在' : '缺失'}, Referer: ${referer ? '存在' : '缺失'}`);
 
         // 必须同时存在 Authorization 和 Referer 才认为是有效请求
         if (auth && referer) {
@@ -55,10 +58,10 @@ async function getCookie() {
                 $.msg($.name, "获取Token成功", "Token已更新，请去运行监控脚本测试");
                 console.log(`[${$.name}] Token 更新成功`);
             } else {
-                console.log(`[${$.name}] Token 未变化，跳过通知`);
+                if (isDebug) console.log(`[${$.name}] Token 未变化，跳过通知`);
             }
         } else {
-            console.log(`[${$.name}] 缺少必要Header，跳过`);
+            if (isDebug) console.log(`[${$.name}] 缺少必要Header，跳过`);
         }
     }
 }
