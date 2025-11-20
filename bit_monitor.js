@@ -101,15 +101,16 @@ async function checkCourses() {
                     break;
                 }
 
-                if (data && data.code === 200 && data.data && data.data.length > 0) {
+                if (data && data.code === 200 && data.data && data.data.items && data.data.items.length > 0) {
+                    const courses = data.data.items;
                     if (isDebug) {
                         // 打印新获取到的数据摘要
-                        const itemsSummary = data.data.map(c => ({id: c.id, title: c.title}));
-                        console.log(`[Debug] ${cat.name}(${status}) 解析到 ${data.data.length} 条数据: ${JSON.stringify(itemsSummary)}`);
+                        const itemsSummary = courses.map(c => ({id: c.id, title: c.title}));
+                        console.log(`[Debug] ${cat.name}(${status}) 解析到 ${courses.length} 条数据: ${JSON.stringify(itemsSummary)}`);
                     }
 
                     // 遍历返回的课程
-                    for (let course of data.data) {
+                    for (let course of courses) {
                         // 如果课程ID大于缓存的ID，则是新课程
                         if (course.id > (cache[cat.id] || 0)) {
                             
@@ -148,7 +149,7 @@ async function checkCourses() {
                                 hasUpdate = true;
                                 const title = course.title || course.transcript_name || "未知名称";
                                 const signTime = course.sign_start_time || "未知";
-                                const place = course.time_place ? course.time_place.replace(/\n/g, " ") : "未知地点";
+                                const place = course.time_place ? course.time_place.replace(/[\r\n]+/g, " ") : "未知地点";
                                 const statusStr = CONFIG.statusMap[status];
                                 
                                 if (isDebug) console.log(`[Debug] 发现新课程(匹配成功): ${title} (ID: ${course.id})`);
