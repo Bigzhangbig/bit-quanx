@@ -89,6 +89,11 @@ async function checkCourses() {
                 if (isDebug) console.log(`[Debug] 请求: ${cat.name} (状态${status})`);
                 const data = await httpGet(url, headers);
                 
+                if (isDebug) {
+                    // 打印完整的响应数据以便调试
+                    console.log(`[Debug] ${cat.name}(${status}) 原始响应: ${JSON.stringify(data)}`);
+                }
+                
                 // 检查 Token 是否失效
                 if (data && (data.code === 401 || data.message === "Unauthenticated.")) {
                     isTokenExpired = true;
@@ -100,7 +105,7 @@ async function checkCourses() {
                     if (isDebug) {
                         // 打印新获取到的数据摘要
                         const itemsSummary = data.data.map(c => ({id: c.id, title: c.title}));
-                        console.log(`[Debug] ${cat.name}(${status}) 获取到 ${data.data.length} 条数据: ${JSON.stringify(itemsSummary)}`);
+                        console.log(`[Debug] ${cat.name}(${status}) 解析到 ${data.data.length} 条数据: ${JSON.stringify(itemsSummary)}`);
                     }
 
                     // 遍历返回的课程

@@ -1,10 +1,10 @@
-#!name=北理工第二课堂Token获取
-#!desc=用于获取北理工第二课堂的Token，需在MITM中添加主机名 qcbldekt.bit.edu.cn
-#!author=Bigzhangbig
-#!homepage=https://github.com/Bigzhangbig/bit-dekt-quanx
+#!name = 北理工第二课堂Token获取
+#!desc = 用于获取北理工第二课堂的Token，需在MITM中添加主机名 qcbldekt.bit.edu.cn
+#!author = Bigzhangbig
+#!homepage = https://github.com/Bigzhangbig/bit-dekt-quanx
 
-[rewrite_local]
+#[rewrite_local]
 ^https:\/\/qcbldekt\.bit\.edu\.cn\/api\/course\/list url script-request-header https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/bit_cookie.js
 
-[mitm]
+#[mitm]
 hostname = qcbldekt.bit.edu.cn
