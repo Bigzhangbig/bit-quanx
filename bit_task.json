@@ -1,0 +1,7 @@
+{
+  "name": "北理工第二课堂监控",
+  "description": "定时监控北理工第二课堂新活动",
+  "task": [
+    "30 8-22/2 * * * https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/bit_monitor.js, tag=第二课堂监控, enabled=true"
+  ]
+}
