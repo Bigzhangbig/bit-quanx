@@ -1,8 +1,6 @@
 /*
  * 脚本名称：北理工第二课堂监控
  * 作者：Gemini for User
- * * [rewrite_local]
- * ^https:\/\/qcbldekt\.bit\.edu\.cn\/api\/course\/list url script-request-header https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/bit_monitor.js
  * * [task_local]
  * 30 8-22/2 * * * https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/bit_monitor.js, tag=第二课堂监控, enabled=true
  * */
@@ -33,49 +31,26 @@ const CONFIG = {
 
 // 脚本入口
 (async () => {
-    if (typeof $request !== "undefined") {
-        await getCookie();
-    } else {
-        await checkCourses();
-    }
+    await checkCourses();
 })().finally(() => $.done());
 
-// 1. 获取并存储 Token (运行在 Rewrite 模式)
-async function getCookie() {
-    if ($request.headers) {
-        const auth = $request.headers['Authorization'] || $request.headers['authorization'];
-        // 保存 Authorization
-        if (auth) {
-            $.setdata(auth, CONFIG.tokenKey);
-            
-            // 保存其他头部信息 (User-Agent, Referer等) 以伪装请求
-            const headersToSave = JSON.stringify({
-                'User-Agent': $request.headers['User-Agent'] || $request.headers['user-agent'],
-                'Referer': $request.headers['Referer'] || $request.headers['referer'],
-                'Host': 'qcbldekt.bit.edu.cn',
-                'Connection': 'keep-alive',
-                'Accept-Encoding': 'gzip,compress,br,deflate'
-            });
-            $.setdata(headersToSave, CONFIG.headersKey);
-            
-            $.msg($.name, "获取Token成功", "请去运行任务脚本测试");
-        }
-    }
-}
-
-// 2. 监控逻辑 (运行在 Task 模式)
+// 监控逻辑 (运行在 Task 模式)
 async function checkCourses() {
     const token = $.getdata(CONFIG.tokenKey);
     const savedHeaders = $.getdata(CONFIG.headersKey);
     
     if (!token) {
-        $.msg($.name, "❌ 未找到 Token", "请先进入微信小程序“第二课堂”刷新任意列表以获取 Token。");
+        $.msg($.name, "❌ 未找到 Token", "请先运行 bit_cookie.js 脚本，并进入微信小程序“第二课堂”刷新任意列表以获取 Token。");
         return;
     }
 
     const headers = JSON.parse(savedHeaders || "{}");
     headers['Authorization'] = token;
     headers['Content-Type'] = 'application/json;charset=utf-8';
+    // 确保包含 Accept-Encoding 以支持 gzip 解密
+    if (!headers['Accept-Encoding']) {
+        headers['Accept-Encoding'] = 'gzip, deflate, br';
+    }
 
     // 读取上一次的缓存数据
     let cache = JSON.parse($.getdata(CONFIG.cacheKey) || "{}");
