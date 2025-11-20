@@ -122,9 +122,11 @@ async function checkCourses() {
                             if (filterCollege !== "不限") {
                                 const collegeList = course.college || [];
                                 const department = course.department || "";
-                                // 检查 college 数组是否包含 OR department 字符串是否包含
-                                const matchCollege = collegeList.some(c => c.includes(filterCollege)) || department.includes(filterCollege);
-                                if (!matchCollege) isMatch = false;
+                                // 如果课程有明确的学院限制（列表不为空），则检查是否匹配；否则（列表为空）视为不限，直接通过
+                                if (collegeList.length > 0 || department) {
+                                    const matchCollege = collegeList.some(c => c.includes(filterCollege)) || department.includes(filterCollege);
+                                    if (!matchCollege) isMatch = false;
+                                }
                             }
 
                             // 2. 年级筛选 (例如 "2025级" -> 2025)

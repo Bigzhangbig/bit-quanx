@@ -38,7 +38,7 @@
           "id": "bit_sc_filter_college",
           "name": "学院筛选",
           "val": "不限",
-          "type": "select",
+          "type": "selects",
           "items": [
             { "key": "不限", "label": "不限" },
             { "key": "睿信书院", "label": "睿信书院" },
@@ -77,7 +77,7 @@
           "id": "bit_sc_filter_grade",
           "name": "年级筛选",
           "val": "不限",
-          "type": "select",
+          "type": "selects",
           "items": [
             { "key": "不限", "label": "不限" },
             { "key": "2025级", "label": "2025级" },
@@ -91,7 +91,7 @@
           "id": "bit_sc_filter_type",
           "name": "类型筛选",
           "val": "不限",
-          "type": "select",
+          "type": "selects",
           "items": [
             { "key": "不限", "label": "不限" },
             { "key": "本科生", "label": "本科生" },
