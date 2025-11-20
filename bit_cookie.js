@@ -19,7 +19,11 @@ const CONFIG = {
 
 (async () => {
     if (typeof $request !== "undefined") {
-        await getCookie();
+        try {
+            await getCookie();
+        } catch (e) {
+            console.log(`[${$.name}] 脚本执行异常: ${e}`);
+        }
     }
     $done({});
 })();
