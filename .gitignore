@@ -2,3 +2,4 @@ env.json
 local_debug.js
 node_modules/
 .DS_Store
+抓包内容/
