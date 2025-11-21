@@ -38,28 +38,36 @@ async function checkActivities() {
         'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.10(0x18000a2a) NetType/WIFI Language/zh_CN'
     };
 
-    const request = {
-        url: CONFIG.listUrl,
-        headers: headers
-    };
-
-    $.get(request, (error, response, data) => {
-        if (error) {
-            $.logErr("请求失败", error);
-            $.msg($.name, "请求失败", error);
-            return;
+    try {
+        const res = await httpGet(CONFIG.listUrl, headers);
+        if (res.code === 200 && res.data && res.data.items) {
+            processItems(res.data.items);
+        } else {
+            $.log("获取列表失败或列表为空: " + JSON.stringify(res));
         }
+    } catch (error) {
+        $.logErr("请求失败", error);
+        $.msg($.name, "请求失败", error);
+    }
+}
 
-        try {
-            const res = JSON.parse(data);
-            if (res.code === 200 && res.data && res.data.items) {
-                processItems(res.data.items);
+function httpGet(url, headers) {
+    return new Promise((resolve, reject) => {
+        $.get({ url, headers }, (err, resp, data) => {
+            if (err) {
+                reject(err);
             } else {
-                $.log("获取列表失败或列表为空: " + data);
+                if (resp.status === 401 || resp.statusCode === 401) {
+                    resolve({ code: 401, message: "Unauthenticated." });
+                    return;
+                }
+                try {
+                    resolve(JSON.parse(data));
+                } catch (e) {
+                    reject("JSON解析失败");
+                }
             }
-        } catch (e) {
-            $.logErr("解析响应失败", e);
-        }
+        });
     });
 }
 
