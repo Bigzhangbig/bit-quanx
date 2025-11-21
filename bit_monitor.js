@@ -134,9 +134,19 @@ async function checkCourses() {
                     for (let course of courses) {
                         if (status === 1) unstartedCount++;
 
+                        // 计算剩余名额
+                        let surplus = 0;
+                        if (course.surplus !== undefined) {
+                            surplus = course.surplus;
+                        } else {
+                            surplus = (course.max || 0) - (course.course_apply_count || 0);
+                        }
+
                         const isNew = course.id > (cache[cat.id] || 0);
-                        // Debug模式下：进行中、未报名、有名额（或未知）
-                        const isDebugPick = isDebug && status === 2 && !course.is_sign && (course.surplus === undefined || course.surplus > 0);
+                        // Debug模式下：进行中、未报名、有名额
+                        // 注意：如果 is_sign 不存在，默认为未报名，依靠后端去重
+                        const isNotSigned = course.is_sign === undefined ? true : !course.is_sign;
+                        const isDebugPick = isDebug && status === 2 && isNotSigned && surplus > 0;
 
                         // 如果课程ID大于缓存的ID，则是新课程；或者是Debug模式下的捡漏目标
                         if (isNew || isDebugPick) {
