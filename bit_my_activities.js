@@ -90,7 +90,7 @@ function processItems(items) {
             if (endTimeStr) {
                 const endTime = new Date(endTimeStr.replace(/-/g, '/')); // 兼容性替换
                 
-                // 如果当前时间在结束时间之前 (且假设在开始时间之后，虽然列表里没给开始时间，但通常出现在列表里就是相关的)
+                // 如果当前时间在结束时间之前
                 if (now < endTime) {
                     notifyItems.push({
                         title: item.course_title,
@@ -104,31 +104,29 @@ function processItems(items) {
     }
 
     if (notifyItems.length > 0) {
-        // 优先处理第一个，或者最紧急的一个
-        const item = notifyItems[0];
-        const qrUrl = `${CONFIG.qrBaseUrl}${item.id}`;
-        
-        // 复制二维码链接到剪贴板
-        $.setdata(qrUrl, "clipboard"); // QX setdata to clipboard? No, QX uses $notify(title, subtitle, content, {"open-url": url, "media-url": url})
-        // QX Polyfill usually doesn't support clipboard writing easily unless mapped to $pasteboard.copy()
-        // My Env polyfill below maps setdata to $prefs.setValue, not clipboard.
-        // I will use the specific QX API if available in the environment, or just put it in the notification.
-        
-        if (typeof $pasteboard !== 'undefined') {
-            $pasteboard.copy(qrUrl);
-        } else {
-             // Fallback for Node environment or other
-             console.log(`[Clipboard] Would copy: ${qrUrl}`);
-        }
+        // 遍历通知所有待处理事项
+        for (let i = 0; i < notifyItems.length; i++) {
+            const item = notifyItems[i];
+            const qrUrl = `${CONFIG.qrBaseUrl}${item.id}`;
+            
+            // 仅复制第一个（最紧急）的二维码链接到剪贴板
+            if (i === 0) {
+                if (typeof $pasteboard !== 'undefined') {
+                    $pasteboard.copy(qrUrl);
+                } else {
+                    console.log(`[Clipboard] Would copy: ${qrUrl}`);
+                }
+            }
 
-        $.msg(
-            $.name, 
-            `⚠️ ${item.action}提醒: ${item.title}`, 
-            `截止时间: ${item.deadline}\n已复制二维码链接，点击跳转`,
-            {"open-url": qrUrl}
-        );
-        
-        console.log(`已通知: ${item.title} ${item.action}`);
+            $.msg(
+                $.name, 
+                `⚠️ ${item.action}提醒: ${item.title}`, 
+                `截止时间: ${item.deadline}\n${i===0 ? '已复制二维码链接，' : ''}点击跳转`,
+                {"open-url": qrUrl}
+            );
+            
+            console.log(`已通知: ${item.title} ${item.action}`);
+        }
     } else {
         console.log("没有需要签到/签退的活动");
     }
