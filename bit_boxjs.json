@@ -13,7 +13,10 @@
         "bit_sc_headers",
         "bit_sc_cache",
         "bit_sc_signup_course_id",
-        "bit_sc_debug"
+        "bit_sc_debug",
+        "bit_sc_github_token",
+        "bit_sc_gist_id",
+        "bit_sc_gist_filename"
       ],
       "descs_html": [
         "请先在 Quantumult X 中添加重写规则获取 Token。",
@@ -99,6 +102,27 @@
             { "key": "研究生", "label": "研究生" }
           ],
           "desc": "仅通知包含选中类型的课程"
+        },
+        {
+          "id": "bit_sc_github_token",
+          "name": "GitHub Token",
+          "val": "",
+          "type": "text",
+          "desc": "用于自动同步Cookie到Gist (repo权限)"
+        },
+        {
+          "id": "bit_sc_gist_id",
+          "name": "Gist ID",
+          "val": "",
+          "type": "text",
+          "desc": "用于存储Cookie的Gist ID"
+        },
+        {
+          "id": "bit_sc_gist_filename",
+          "name": "Gist 文件名",
+          "val": "bit_cookies.json",
+          "type": "text",
+          "desc": "Gist中存储Cookie的文件名"
         },
         {
             "id": "bit_sc_token",

@@ -14,7 +14,10 @@ const $ = new Env("北理工第二课堂-获取Token");
 const CONFIG = {
     tokenKey: "bit_sc_token",
     headersKey: "bit_sc_headers",
-    debugKey: "bit_sc_debug"
+    debugKey: "bit_sc_debug",
+    githubTokenKey: "bit_sc_github_token",
+    gistIdKey: "bit_sc_gist_id",
+    gistFileNameKey: "bit_sc_gist_filename"
 };
 
 (async () => {
@@ -59,6 +62,9 @@ async function getCookie() {
                 });
                 $.setdata(headersToSave, CONFIG.headersKey);
                 
+                // 同步到 Gist
+                await updateGist(auth, headersToSave);
+
                 $.msg($.name, "获取Token成功", "Token已更新，请去运行监控脚本测试");
                 console.log(`[${$.name}] Token 更新成功`);
             } else {
@@ -68,6 +74,70 @@ async function getCookie() {
             if (isDebug) console.log(`[${$.name}] 缺少必要Header，跳过`);
         }
     }
+}
+
+async function updateGist(token, headers) {
+    const githubToken = $.getdata(CONFIG.githubTokenKey);
+    const gistId = $.getdata(CONFIG.gistIdKey);
+    const filename = $.getdata(CONFIG.gistFileNameKey) || "bit_cookies.json";
+
+    if (!githubToken || !gistId) {
+        console.log(`[${$.name}] 未配置 GitHub Token 或 Gist ID，跳过 Gist 同步`);
+        return;
+    }
+
+    const content = JSON.stringify({
+        token: token,
+        headers: JSON.parse(headers),
+        updated_at: new Date().toISOString()
+    }, null, 2);
+
+    const url = `https://api.github.com/gists/${gistId}`;
+    const method = "PATCH";
+    const headers_req = {
+        "Authorization": `token ${githubToken}`,
+        "User-Agent": "BIT-DEKT-Script",
+        "Accept": "application/vnd.github.v3+json",
+        "Content-Type": "application/json"
+    };
+    const body = JSON.stringify({
+        files: {
+            [filename]: {
+                content: content
+            }
+        }
+    });
+
+    const myRequest = {
+        url: url,
+        method: method,
+        headers: headers_req,
+        body: body
+    };
+
+    return new Promise((resolve) => {
+        if ($.isQuanX) {
+            $task.fetch(myRequest).then(
+                response => {
+                    console.log(`[${$.name}] Gist同步响应: ${response.statusCode}`);
+                    if (response.statusCode >= 200 && response.statusCode < 300) {
+                        console.log(`[${$.name}] Gist同步成功`);
+                        $.msg($.name, "Gist同步成功", "Token已同步到GitHub Gist");
+                    } else {
+                        console.log(`[${$.name}] Gist同步失败: ${response.body}`);
+                    }
+                    resolve();
+                },
+                reason => {
+                    console.log(`[${$.name}] Gist同步出错: ${reason.error}`);
+                    resolve();
+                }
+            );
+        } else {
+            console.log(`[${$.name}] 非QuanX环境，暂不支持Gist同步`);
+            resolve();
+        }
+    });
 }
 
 // --- Env Polyfill ---
