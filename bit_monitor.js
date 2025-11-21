@@ -169,8 +169,8 @@ async function checkCourses() {
                         const isNotSigned = course.is_sign === undefined ? true : !course.is_sign;
                         const isPickupTarget = isPickupMode && status === 2 && isNotSigned && surplus > 0;
 
-                        // 如果课程ID大于缓存的ID，则是新课程；或者是捡漏模式下的捡漏目标
-                        if (isNew || isPickupTarget) {
+                        // 如果课程ID大于缓存的ID，则是新课程；或者是捡漏模式下的捡漏目标；或者是未开始的课程(确保加入列表)
+                        if (isNew || isPickupTarget || (status === 1)) {
                             
                             // --- 筛选逻辑 ---
                             let isMatch = true;
@@ -186,9 +186,9 @@ async function checkCourses() {
                                 // 3. 课程主办方(department)包含选中学院 -> 匹配
                                 const isUnlimited = collegeList.length === 0;
                                 const isTargeted = collegeList.some(c => c.includes(filterCollege));
-                                const isOrganizer = department.includes(filterCollege);
+                                // const isOrganizer = department.includes(filterCollege); // 移除主办方匹配
 
-                                if (!isUnlimited && !isTargeted && !isOrganizer) {
+                                if (!isUnlimited && !isTargeted) {
                                     isMatch = false;
                                 }
                             }
@@ -223,7 +223,7 @@ async function checkCourses() {
                                 if (isDebug) console.log(`[Debug] 处理课程: ${title} (ID: ${course.id}, New: ${isNew})`);
 
                                 // 自动设置报名ID (如果是未开始的课程)
-                                if (status === 1 && isNew) {
+                                if (status === 1) {
                                     // 1. 加入待报名列表
                                     let list = [];
                                     try { list = JSON.parse($.getdata(CONFIG.signupListKey) || "[]"); } catch(e){}
@@ -234,6 +234,7 @@ async function checkCourses() {
                                         list.push({ id: course.id, title: title, time: signTime });
                                         $.setdata(JSON.stringify(list), CONFIG.signupListKey);
                                         listMsg = "\n📝 已加入待报名列表";
+                                        if (isDebug) console.log(`[Debug] 加入待报名列表: ${title}`);
                                     }
 
                                     // 2. 更新旧版单ID (兼容)
@@ -244,13 +245,16 @@ async function checkCourses() {
                                         autoIdMsg = `\n🎯 已自动设置报名ID: ${course.id}`;
                                     }
                                     
-                                    notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${title}\n⏰ 报名时间: ${signTime}\n📍 ${place}${listMsg}${autoIdMsg}\n\n`;
+                                    if (isNew) {
+                                        notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${title}\n⏰ 报名时间: ${signTime}\n📍 ${place}${listMsg}${autoIdMsg}\n\n`;
+                                    }
                                 } else if (status === 2) {
                                     // 进行中的课程，尝试自动报名
                                     let signupResultMsg = "";
                                     // 假设字段 is_sign, 1为已报名
-                                    if (!course.is_sign && isPickupMode) {
-                                        console.log(`[Monitor] 尝试自动报名: ${title}`);
+                                    // 修改：如果是捡漏模式，或者发现了新课程(且未报名)，都直接尝试报名
+                                    if (!course.is_sign && (isPickupMode || isNew)) {
+                                        console.log(`[Monitor] 尝试自动报名(新课程或捡漏): ${title}`);
                                         const signupRes = await autoSignup(course.id, token, headers);
                                         
                                         if (signupRes.success) {
@@ -263,11 +267,11 @@ async function checkCourses() {
                                         if (isDebug || (signupRes.success && !isNew)) {
                                             const statusIcon = signupRes.success ? "✅" : "❌";
                                             // 标题简单，不要两行
-                                            $.msg(`${statusIcon} 捡漏${signupRes.success ? "成功" : "失败"}`, "", `${title}\n${signupRes.message}`);
+                                            $.msg(`${statusIcon} 自动报名${signupRes.success ? "成功" : "失败"}`, "", `${title}\n${signupRes.message}`);
                                         }
                                     } else if (course.is_sign) {
                                         signupResultMsg = `\n⚠️ 已报名，跳过`;
-                                    } else if (!isPickupMode) {
+                                    } else if (!isPickupMode && !isNew) {
                                         signupResultMsg = `\n⚠️ 未开启捡漏模式，跳过报名`;
                                     }
                                     
