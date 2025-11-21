@@ -7,6 +7,8 @@
 
 const $ = new Env("北理工第二课堂-自动报名");
 
+console.log("加载脚本: 北理工第二课堂-自动报名");
+
 const CONFIG = {
     // BoxJS Keys
     tokenKey: "bit_sc_token",
@@ -33,6 +35,7 @@ async function main() {
     
     if (!token) {
         $.msg($.name, "❌ 未找到 Token", "请先运行 bit_cookie.js 获取 Token");
+        $.done();
         return;
     }
 
@@ -55,6 +58,7 @@ async function main() {
 
     if (!Array.isArray(signupList) || signupList.length === 0) {
         console.log("待报名列表为空");
+        $.done();
         return;
     }
 
@@ -153,6 +157,8 @@ async function main() {
         $.setdata(JSON.stringify(newList), CONFIG.signupListKey);
         console.log("已更新待报名列表");
     }
+    
+    $.done();
 }
 
 async function waitAndLog(targetTime) {
@@ -231,4 +237,68 @@ function httpPost(options) {
 }
 
 // Env Polyfill
-function Env(t,e){"undefined"!=typeof process&&JSON.stringify(process.env).indexOf("GITHUB")>-1&&process.exit(0);class s{constructor(t){this.env=t}msg(t,e,s){"undefined"!=typeof $notify&&$notify(t,e,s)}getdata(t){if("undefined"!=typeof $task)return $task.read(t);if("undefined"!=typeof $prefs)return $prefs.valueForKey(t);if("undefined"!=typeof process)return process.env[t]||"";return""}setdata(t,e){if("undefined"!=typeof $task)return $task.write(t,e);if("undefined"!=typeof $prefs)return $prefs.setValueForKey(t,e);if("undefined"!=typeof process)return process.env[e]=t,!0;return!1}get(t,e){const s="string"==typeof t?{url:t}:t;if("undefined"!=typeof $task)s.method="GET",$task.fetch(s).then(t=>{e(null,{},t.body)},t=>{e(t.error,null,null)});else if("undefined"!=typeof $httpClient)$httpClient.get(s,(t,s,i)=>{e(t,s,i)});else if("undefined"!=typeof require){const i=require("request");i.get(s,(t,s,i)=>{e(t,s,i)})}}post(t,e){const s="string"==typeof t?{url:t}:t;if("undefined"!=typeof $task)s.method="POST",$task.fetch(s).then(t=>{e(null,{},t.body)},t=>{e(t.error,null,null)});else if("undefined"!=typeof $httpClient)$httpClient.post(s,(t,s,i)=>{e(t,s,i)});else if("undefined"!=typeof require){const i=require("request");i.post(s,(t,s,i)=>{e(t,s,i)})}}done(t={}){"undefined"!=typeof $task?$task.done(t):"undefined"!=typeof $done&&$done(t)}}return new s(t,e)}
+function Env(t, e) {
+    class s {
+        constructor(t) {
+            this.env = t
+        }
+    }
+    return new class {
+        constructor(t) {
+            this.name = t, this.logs = [], this.isSurge = !1, this.isQuanX = "undefined" != typeof $task, this.isLoon = !1
+        }
+        getdata(t) {
+            let e = this.getval(t);
+            if (/^@/.test(t)) {
+                const [, s, i] = /^@(.*?)\.(.*?)$/.exec(t), r = s ? this.getval(s) : "";
+                if (r) try {
+                    const t = JSON.parse(r);
+                    e = t ? this.getval(i, t) : null
+                } catch (t) {
+                    e = ""
+                }
+            }
+            return e
+        }
+        setdata(t, e) {
+            let s = !1;
+            if (/^@/.test(e)) {
+                const [, i, r] = /^@(.*?)\.(.*?)$/.exec(e), o = this.getval(i), h = i ? "null" === o ? null : o || "{}" : "{}";
+                try {
+                    const e = JSON.parse(h);
+                    this.setval(r, t, e), s = !0, this.setval(i, JSON.stringify(e))
+                } catch (e) {
+                    const o = {};
+                    this.setval(r, t, o), s = !0, this.setval(i, JSON.stringify(o))
+                }
+            } else s = this.setval(t, e);
+            return s
+        }
+        getval(t) {
+            return this.isQuanX ? $prefs.valueForKey(t) : ""
+        }
+        setval(t, e) {
+            return this.isQuanX ? $prefs.setValueForKey(t, e) : ""
+        }
+        msg(e = t, s = "", i = "", r) {
+            this.isQuanX && $notify(e, s, i, r)
+        }
+        get(t, e = (() => {})) {
+            this.isQuanX && ("string" == typeof t && (t = {
+                url: t
+            }), t.method = "GET", $task.fetch(t).then(t => {
+                e(null, t, t.body)
+            }, t => e(t.error, null, null)))
+        }
+        post(t, e = (() => {})) {
+            this.isQuanX && ("string" == typeof t && (t = {
+                url: t
+            }), t.method = "POST", $task.fetch(t).then(t => {
+                e(null, t, t.body)
+            }, t => e(t.error, null, null)))
+        }
+        done(t = {}) {
+            this.isQuanX && $done(t)
+        }
+    }(t, e)
+}
