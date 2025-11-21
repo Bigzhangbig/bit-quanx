@@ -14,6 +14,7 @@
         "bit_sc_cache",
         "bit_sc_signup_course_id",
         "bit_sc_debug",
+        "bit_sc_pickup_mode",
         "bit_sc_github_token",
         "bit_sc_gist_id",
         "bit_sc_gist_filename"
@@ -33,10 +34,17 @@
         },
         {
           "id": "bit_sc_debug",
-          "name": "开启调试日志 (兼捡漏模式)",
+          "name": "开启调试日志",
           "val": false,
           "type": "boolean",
-          "desc": "开启后：1. 打印详细日志；2. 监控脚本会自动尝试报名所有进行中且有名额的课程（捡漏）"
+          "desc": "开启后打印详细日志，方便排查问题"
+        },
+        {
+          "id": "bit_sc_pickup_mode",
+          "name": "开启捡漏模式",
+          "val": false,
+          "type": "boolean",
+          "desc": "开启后，监控脚本会自动尝试报名所有进行中且有名额的课程"
         },
         {
           "id": "bit_sc_filter_college",

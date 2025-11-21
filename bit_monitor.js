@@ -14,6 +14,7 @@ const CONFIG = {
     headersKey: "bit_sc_headers",
     cacheKey: "bit_sc_cache", // 用来存上一次的最新课程ID
     debugKey: "bit_sc_debug", // 调试模式开关
+    pickupKey: "bit_sc_pickup_mode", // 捡漏模式开关
     filterCollegeKey: "bit_sc_filter_college",
     filterGradeKey: "bit_sc_filter_grade",
     filterTypeKey: "bit_sc_filter_type",
@@ -49,6 +50,7 @@ async function checkCourses() {
     const token = $.getdata(CONFIG.tokenKey);
     const savedHeaders = $.getdata(CONFIG.headersKey);
     const isDebug = $.getdata(CONFIG.debugKey) === "true";
+    const isPickupMode = $.getdata(CONFIG.pickupKey) === "true";
     
     // 获取筛选配置
     const filterCollege = $.getdata(CONFIG.filterCollegeKey) || "不限";
@@ -146,10 +148,10 @@ async function checkCourses() {
                         // Debug模式下：进行中、未报名、有名额
                         // 注意：如果 is_sign 不存在，默认为未报名，依靠后端去重
                         const isNotSigned = course.is_sign === undefined ? true : !course.is_sign;
-                        const isDebugPick = isDebug && status === 2 && isNotSigned && surplus > 0;
+                        const isPickupTarget = isPickupMode && status === 2 && isNotSigned && surplus > 0;
 
-                        // 如果课程ID大于缓存的ID，则是新课程；或者是Debug模式下的捡漏目标
-                        if (isNew || isDebugPick) {
+                        // 如果课程ID大于缓存的ID，则是新课程；或者是捡漏模式下的捡漏目标
+                        if (isNew || isPickupTarget) {
                             
                             // --- 筛选逻辑 ---
                             let isMatch = true;
@@ -209,7 +211,7 @@ async function checkCourses() {
                                     // 进行中的课程，尝试自动报名
                                     let signupResultMsg = "";
                                     // 假设字段 is_sign, 1为已报名
-                                    if (!course.is_sign) {
+                                    if (!course.is_sign && isPickupMode) {
                                         console.log(`[Monitor] 尝试自动报名: ${title}`);
                                         const signupRes = await autoSignup(course.id, token, headers);
                                         if (signupRes.success) {
@@ -218,8 +220,10 @@ async function checkCourses() {
                                         } else {
                                             signupResultMsg = `\n❌ 自动报名失败: ${signupRes.message}`;
                                         }
-                                    } else {
+                                    } else if (course.is_sign) {
                                         signupResultMsg = `\n⚠️ 已报名，跳过`;
+                                    } else if (!isPickupMode) {
+                                        signupResultMsg = `\n⚠️ 未开启捡漏模式，跳过报名`;
                                     }
                                     
                                     if (isNew) {
