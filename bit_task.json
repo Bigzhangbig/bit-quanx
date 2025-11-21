@@ -4,6 +4,6 @@
   "task": [
     "*/5 7-23 * * * https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/bit_monitor.js, tag=第二课堂监控, enabled=true",
     "*/30 * * * * https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/bit_signup.js, tag=第二课堂报名, enabled=true",
-    "0 8-22 * * * https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/bit_my_activities.js, tag=第二课堂我的活动, enabled=true"
+    "0 8,12,18 * * * https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/bit_my_activities.js, tag=第二课堂我的活动, enabled=true"
   ]
 }

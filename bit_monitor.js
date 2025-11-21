@@ -239,11 +239,11 @@ async function checkCourses() {
 
                                     // 2. 更新旧版单ID (兼容)
                                     let autoIdMsg = "";
-                                    if (course.id >= currentMaxSignupId) {
-                                        $.setdata(course.id.toString(), CONFIG.signupCourseIdKey);
-                                        currentMaxSignupId = course.id;
-                                        autoIdMsg = `\n🎯 已自动设置报名ID: ${course.id}`;
-                                    }
+                                    // if (course.id >= currentMaxSignupId) {
+                                    //     $.setdata(course.id.toString(), CONFIG.signupCourseIdKey);
+                                    //     currentMaxSignupId = course.id;
+                                    //     autoIdMsg = `\n🎯 已自动设置报名ID: ${course.id}`;
+                                    // }
                                     
                                     if (isNew) {
                                         notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${title}\n⏰ 报名时间: ${signTime}\n📍 ${place}${listMsg}${autoIdMsg}\n\n`;
