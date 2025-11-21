@@ -15,6 +15,7 @@
         "bit_sc_signup_course_id",
         "bit_sc_debug",
         "bit_sc_pickup_mode",
+        "bit_sc_random_delay",
         "bit_sc_github_token",
         "bit_sc_gist_id",
         "bit_sc_gist_filename"
@@ -45,6 +46,13 @@
           "val": false,
           "type": "boolean",
           "desc": "开启后，监控脚本会自动尝试报名所有进行中且有名额的课程"
+        },
+        {
+          "id": "bit_sc_random_delay",
+          "name": "随机延迟(秒)",
+          "val": "0",
+          "type": "text",
+          "desc": "每次请求前的随机延迟上限(秒)，0为不延迟"
         },
         {
           "id": "bit_sc_filter_college",

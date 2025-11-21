@@ -15,6 +15,7 @@ const CONFIG = {
     cacheKey: "bit_sc_cache", // 用来存上一次的最新课程ID
     debugKey: "bit_sc_debug", // 调试模式开关
     pickupKey: "bit_sc_pickup_mode", // 捡漏模式开关
+    delayKey: "bit_sc_random_delay", // 随机延迟 Key
     filterCollegeKey: "bit_sc_filter_college",
     filterGradeKey: "bit_sc_filter_grade",
     filterTypeKey: "bit_sc_filter_type",
@@ -51,6 +52,7 @@ async function checkCourses() {
     const savedHeaders = $.getdata(CONFIG.headersKey);
     const isDebug = $.getdata(CONFIG.debugKey) === "true";
     const isPickupMode = $.getdata(CONFIG.pickupKey) === "true";
+    const randomDelay = parseInt($.getdata(CONFIG.delayKey) || "0");
     
     // 获取筛选配置
     const filterCollege = $.getdata(CONFIG.filterCollegeKey) || "不限";
@@ -58,7 +60,7 @@ async function checkCourses() {
     const filterType = $.getdata(CONFIG.filterTypeKey) || "不限";
 
     if (!token) {
-        $.msg($.name, "❌ 未找到 Token", "请先运行 bit_cookie.js 脚本，并进入微信小程序“第二课堂”刷新任意列表以获取 Token。");
+        $.msg("❌ 未找到 Token", "", "请先运行 bit_cookie.js 脚本，并进入微信小程序“第二课堂”刷新任意列表以获取 Token。");
         $done();
         return;
     }
@@ -72,10 +74,13 @@ async function checkCourses() {
 
     // 优先处理指定报名ID
     const envSignupId = $.getdata(CONFIG.signupCourseIdKey);
+    let currentMaxSignupId = envSignupId ? parseInt(envSignupId) : 0;
+    if (isNaN(currentMaxSignupId)) currentMaxSignupId = 0;
+
     if (envSignupId) {
         if (isDebug) console.log(`[Debug] 检测到指定报名ID: ${envSignupId}，尝试报名...`);
         const envRes = await autoSignup(envSignupId, token, headers);
-        if (envRes.success) $.msg($.name, "✅ 指定课程报名成功", `ID: ${envSignupId}\n${envRes.message}`);
+        if (envRes.success) $.msg("✅ 指定课程报名成功", "", `ID: ${envSignupId}\n${envRes.message}`);
         else if (isDebug) console.log(`[Debug] 指定课程 ${envSignupId} 报名结果: ${envRes.message}`);
     }
 
@@ -107,6 +112,12 @@ async function checkCourses() {
             const url = `https://qcbldekt.bit.edu.cn/api/course/list?page=1&limit=5&sign_status=${status}&transcript_index_id=${cat.id}&transcript_index_type_id=0`;
             
             try {
+                if (randomDelay > 0) {
+                    const delayMs = Math.floor(Math.random() * randomDelay * 1000);
+                    if (isDebug) console.log(`[Debug] 随机延迟: ${delayMs}ms`);
+                    await new Promise(r => setTimeout(r, delayMs));
+                }
+
                 if (isDebug) console.log(`[Debug] 请求: ${cat.name} (状态${status})`);
                 const data = await httpGet(url, headers);
                 
@@ -205,8 +216,13 @@ async function checkCourses() {
 
                                 // 自动设置报名ID (如果是未开始的课程)
                                 if (status === 1 && isNew) {
-                                    $.setdata(course.id.toString(), CONFIG.signupCourseIdKey);
-                                    notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${title}\n⏰ 报名时间: ${signTime}\n📍 ${place}\n🎯 已自动设置报名ID: ${course.id}\n\n`;
+                                    if (course.id >= currentMaxSignupId) {
+                                        $.setdata(course.id.toString(), CONFIG.signupCourseIdKey);
+                                        currentMaxSignupId = course.id;
+                                        notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${title}\n⏰ 报名时间: ${signTime}\n📍 ${place}\n🎯 已自动设置报名ID: ${course.id}\n\n`;
+                                    } else {
+                                        notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${title}\n⏰ 报名时间: ${signTime}\n📍 ${place}\n\n`;
+                                    }
                                 } else if (status === 2) {
                                     // 进行中的课程，尝试自动报名
                                     let signupResultMsg = "";
@@ -214,11 +230,18 @@ async function checkCourses() {
                                     if (!course.is_sign && isPickupMode) {
                                         console.log(`[Monitor] 尝试自动报名: ${title}`);
                                         const signupRes = await autoSignup(course.id, token, headers);
+                                        
                                         if (signupRes.success) {
                                             signupResultMsg = `\n✅ 自动报名成功: ${signupRes.message}`;
-                                            if (!isNew) $.msg($.name, "✅ 捡漏报名成功", `课程: ${title}\n结果: ${signupRes.message}`);
                                         } else {
                                             signupResultMsg = `\n❌ 自动报名失败: ${signupRes.message}`;
+                                        }
+
+                                        // Debug模式 或 报名成功且非新课程 时发送单独通知
+                                        if (isDebug || (signupRes.success && !isNew)) {
+                                            const statusIcon = signupRes.success ? "✅" : "❌";
+                                            // 标题简单，不要两行
+                                            $.msg(`${statusIcon} 捡漏${signupRes.success ? "成功" : "失败"}`, "", `${title}\n${signupRes.message}`);
                                         }
                                     } else if (course.is_sign) {
                                         signupResultMsg = `\n⚠️ 已报名，跳过`;
@@ -264,18 +287,18 @@ async function checkCourses() {
     let openUrl = "weixin://dl/business/?t=34E4TP288tr";
 
     if (isTokenExpired) {
-        $.msg($.name, "⚠️ Token 已失效", "请重新进入小程序刷新列表获取新的 Token", { "open-url": openUrl });
+        $.msg("⚠️ Token 已失效", "", "请重新进入小程序刷新列表获取新的 Token", { "open-url": openUrl });
         $done();
         return;
     }
 
     // 如果有更新，发送通知并保存新缓存
     if (hasUpdate) {
-        $.msg($.name, "发现新课程活动！", notifyMsg, { "open-url": openUrl });
+        $.msg("🆕 发现新课程", "", notifyMsg, { "open-url": openUrl });
         $.setdata(JSON.stringify(cache), CONFIG.cacheKey);
     } else {
         if (isDebug) {
-            $.msg($.name + " [Debug]", "监控运行完成", `共获取课程: ${totalFetchedCount}\n未开始课程: ${unstartedCount}\n暂无新课程`, { "open-url": openUrl });
+            $.msg("🔍 监控完成", "", `共获取课程: ${totalFetchedCount}\n未开始课程: ${unstartedCount}\n暂无新课程`, { "open-url": openUrl });
             console.log(`[Debug] 暂无新课程更新`);
         } else {
             console.log("暂无新课程更新");
