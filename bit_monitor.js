@@ -7,6 +7,8 @@
 
 const $ = new Env("北理工第二课堂");
 
+console.log("加载脚本: 北理工第二课堂监控 (v20251121-Fix)");
+
 // 配置项
 const CONFIG = {
     // BoxJS/Store Keys
