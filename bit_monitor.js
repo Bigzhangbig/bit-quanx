@@ -278,7 +278,7 @@ async function checkCourses() {
                                         if (isDebug || (signupRes.success && !isNew)) {
                                             const statusIcon = signupRes.success ? "✅" : "❌";
                                             // 标题简单，不要两行
-                                            $.msg(`${statusIcon} 自动报名${signupRes.success ? "成功" : "失败"}`, "", `${title}\n${signupRes.message}`);
+                                            $.msg(`${statusIcon} 自动报名${signupRes.success ? "成功" : "失败"}`, "", `${title}\nID: ${course.id}\n${signupRes.message}`);
                                         }
                                     } else if (course.is_sign) {
                                         signupResultMsg = `\n⚠️ 已报名，跳过`;

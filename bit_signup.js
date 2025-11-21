@@ -140,13 +140,13 @@ async function main() {
                     }
                 }
 
-                $.msg($.name, `✅ ${statusMsg}`, `课程: ${title}${subMsg}`, { "open-url": "weixin://dl/business/?t=34E4TP288tr" });
+                $.msg($.name, `✅ ${statusMsg}`, `课程: ${title}\nID: ${courseId}${subMsg}`, { "open-url": "weixin://dl/business/?t=34E4TP288tr" });
 
             } else {
                 console.log(`❌ 报名失败: ${result.message}`);
                 // 失败则保留，下次重试
                 newList.push(item);
-                $.msg($.name, "❌ 报名失败", `课程: ${title}\n原因: ${result.message}`);
+                $.msg($.name, "❌ 报名失败", `课程: ${title}\nID: ${courseId}\n原因: ${result.message}`);
             }
         }
     }
