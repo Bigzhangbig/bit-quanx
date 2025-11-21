@@ -23,6 +23,7 @@ const CONFIG = {
     filterGradeKey: "bit_sc_filter_grade",
     filterTypeKey: "bit_sc_filter_type",
     signupCourseIdKey: "bit_sc_signup_course_id", // 报名课程ID Key
+    blacklistKey: "bit_sc_blacklist", // 黑名单 Key (逗号分隔)
     
     // 栏目ID映射
     categories: [
@@ -61,6 +62,10 @@ async function checkCourses() {
     const filterCollege = $.getdata(CONFIG.filterCollegeKey) || "不限";
     const filterGrade = $.getdata(CONFIG.filterGradeKey) || "不限";
     const filterType = $.getdata(CONFIG.filterTypeKey) || "不限";
+    
+    // 获取黑名单
+    const blacklistStr = $.getdata(CONFIG.blacklistKey) || "";
+    const blacklist = blacklistStr.split(/[,，]/).map(id => id.trim()).filter(id => id); // 支持中英文逗号
 
     if (!token) {
         $.msg("❌ 未找到 Token", "", "请先运行 bit_cookie.js 脚本，并进入微信小程序“第二课堂”刷新任意列表以获取 Token。");
@@ -153,6 +158,12 @@ async function checkCourses() {
 
                     // 遍历返回的课程
                     for (let course of courses) {
+                        // 黑名单检查
+                        if (blacklist.includes(course.id.toString())) {
+                            if (isDebug) console.log(`[Debug] 课程 ${course.id} 在黑名单中，跳过`);
+                            continue;
+                        }
+
                         if (status === 1) unstartedCount++;
 
                         // 计算剩余名额
