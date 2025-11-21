@@ -421,6 +421,23 @@ async function checkSignupList(token, headers) {
     }
 }
 
+function httpGet(url, headers) {
+    return new Promise((resolve, reject) => {
+        $.get({ url, headers }, (err, resp, data) => {
+            if (err) {
+                reject(err);
+            } else {
+                try {
+                    const res = JSON.parse(data);
+                    resolve(res);
+                } catch (e) {
+                    resolve(data);
+                }
+            }
+        });
+    });
+}
+
 function httpPost(options) {
     return new Promise((resolve, reject) => {
         $.post(options, (err, resp, data) => {
