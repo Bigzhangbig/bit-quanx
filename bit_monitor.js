@@ -19,7 +19,7 @@ const CONFIG = {
     filterTypeKey: "bit_sc_filter_type",
     signupCourseIdKey: "bit_sc_signup_course_id", // 报名课程ID Key
     
-    // 栏目ID映射 (根据你的截图推断)
+    // 栏目ID映射
     categories: [
         { id: 1, name: "理想信念" },
         { id: 2, name: "科学素养" },
@@ -30,7 +30,8 @@ const CONFIG = {
     ],
     statusMap: {
         1: "未开始",
-        2: "进行中"
+        2: "进行中",
+        3: "已结束"
     },
     // 报名接口
     applyUrl: "https://qcbldekt.bit.edu.cn/api/course/apply",
@@ -53,6 +54,15 @@ async function checkCourses() {
     const filterCollege = $.getdata(CONFIG.filterCollegeKey) || "不限";
     const filterGrade = $.getdata(CONFIG.filterGradeKey) || "不限";
     const filterType = $.getdata(CONFIG.filterTypeKey) || "不限";
+
+    // 优先处理指定报名ID
+    const envSignupId = $.getdata(CONFIG.signupCourseIdKey);
+    if (envSignupId) {
+        if (isDebug) console.log(`[Debug] 检测到指定报名ID: ${envSignupId}，尝试报名...`);
+        const envRes = await autoSignup(envSignupId, token, headers);
+        if (envRes.success) $.msg($.name, "✅ 指定课程报名成功", `ID: ${envSignupId}\n${envRes.message}`);
+        else if (isDebug) console.log(`[Debug] 指定课程 ${envSignupId} 报名结果: ${envRes.message}`);
+    }
 
     if (isDebug) {
         console.log(`[Debug] 开始运行监控脚本`);
@@ -124,8 +134,12 @@ async function checkCourses() {
                     for (let course of courses) {
                         if (status === 1) unstartedCount++;
 
-                        // 如果课程ID大于缓存的ID，则是新课程
-                        if (course.id > (cache[cat.id] || 0)) {
+                        const isNew = course.id > (cache[cat.id] || 0);
+                        // Debug模式下：进行中、未报名、有名额（或未知）
+                        const isDebugPick = isDebug && status === 2 && !course.is_sign && (course.surplus === undefined || course.surplus > 0);
+
+                        // 如果课程ID大于缓存的ID，则是新课程；或者是Debug模式下的捡漏目标
+                        if (isNew || isDebugPick) {
                             
                             // --- 筛选逻辑 ---
                             let isMatch = true;
@@ -168,16 +182,17 @@ async function checkCourses() {
                             }
 
                             if (isMatch) {
-                                hasUpdate = true;
+                                if (isNew) hasUpdate = true;
+                                
                                 const title = course.title || course.transcript_name || "未知名称";
                                 const signTime = course.sign_start_time || "未知";
                                 const place = course.time_place ? course.time_place.replace(/[\r\n]+/g, " ") : "未知地点";
                                 const statusStr = CONFIG.statusMap[status];
                                 
-                                if (isDebug) console.log(`[Debug] 发现新课程(匹配成功): ${title} (ID: ${course.id})`);
+                                if (isDebug) console.log(`[Debug] 处理课程: ${title} (ID: ${course.id}, New: ${isNew})`);
 
                                 // 自动设置报名ID (如果是未开始的课程)
-                                if (status === 1) {
+                                if (status === 1 && isNew) {
                                     $.setdata(course.id.toString(), CONFIG.signupCourseIdKey);
                                     notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${title}\n⏰ 报名时间: ${signTime}\n📍 ${place}\n🎯 已自动设置报名ID: ${course.id}\n\n`;
                                 } else if (status === 2) {
@@ -185,10 +200,11 @@ async function checkCourses() {
                                     let signupResultMsg = "";
                                     // 假设字段 is_sign, 1为已报名
                                     if (!course.is_sign) {
-                                        console.log(`[Monitor] 尝试自动报名进行中的课程: ${title}`);
+                                        console.log(`[Monitor] 尝试自动报名: ${title}`);
                                         const signupRes = await autoSignup(course.id, token, headers);
                                         if (signupRes.success) {
                                             signupResultMsg = `\n✅ 自动报名成功: ${signupRes.message}`;
+                                            if (!isNew) $.msg($.name, "✅ 捡漏报名成功", `课程: ${title}\n结果: ${signupRes.message}`);
                                         } else {
                                             signupResultMsg = `\n❌ 自动报名失败: ${signupRes.message}`;
                                         }
@@ -196,12 +212,14 @@ async function checkCourses() {
                                         signupResultMsg = `\n⚠️ 已报名，跳过`;
                                     }
                                     
-                                    notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${title}\n⏰ 报名时间: ${signTime}\n📍 ${place}${signupResultMsg}\n\n`;
-                                } else {
+                                    if (isNew) {
+                                        notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${title}\n⏰ 报名时间: ${signTime}\n📍 ${place}${signupResultMsg}\n\n`;
+                                    }
+                                } else if (isNew) {
                                     notifyMsg += `【${cat.name} | ${statusStr}】🆕 ${title}\n⏰ 报名时间: ${signTime}\n📍 ${place}\n\n`;
                                 }
                             } else {
-                                if (isDebug) console.log(`[Debug] 发现新课程(被筛选过滤): ${course.title} (ID: ${course.id})`);
+                                if (isDebug && isNew) console.log(`[Debug] 发现新课程(被筛选过滤): ${course.title} (ID: ${course.id})`);
                             }
                             
                             // 更新当前循环发现的最大ID
@@ -331,4 +349,4 @@ function httpGet(url, headers) {
 // 为了脚本简洁，建议直接引用上面的 Env.js 或者让脚本管理器自动处理
 // 这里简单实现 QX 必须的部分：
 
-function Env(t, e) { class s { constructor(t) { this.env = t } } return new class { constructor(t) { this.name = t, this.logs = [], this.isSurge = !1, this.isQuanX = "undefined" != typeof $task, this.isLoon = !1 } getdata(t) { let e = this.getval(t); if (/^@/.test(t)) { const [, s, i] = /^@(.*?)\.(.*?)$/.exec(t), r = s ? this.getval(s) : ""; if (r) try { const t = JSON.parse(r); e = t ? this.getval(i, t) : null } catch (t) { e = "" } } return e } setdata(t, e) { let s = !1; if (/^@/.test(e)) { const [, i, r] = /^@(.*?)\.(.*?)$/.exec(e), o = this.getval(i), h = i ? "null" === o ? null : o || "{}" : "{}"; try { const e = JSON.parse(h); this.setval(r, t, e), s = !0, this.setval(i, JSON.stringify(e)) } catch (e) { const o = {}; this.setval(r, t, o), s = !0, this.setval(i, JSON.stringify(o)) } } else s = this.setval(t, e); return s } getval(t) { return this.isQuanX ? $prefs.valueForKey(t) : "" } setval(t, e) { return this.isQuanX ? $prefs.setValueForKey(t, e) : "" } msg(e = t, s = "", i = "", r) { this.isQuanX && $notify(e, s, i, r) } get(t, e = (() => { })) { this.isQuanX && ("string" == typeof t && (t = { url: t }), t.method = "GET", $task.fetch(t).then(t => { e(null, t, t.body) }, t => e(t.error, null, null))) } done(t = {}) { this.isQuanX && $done(t) } }(t, e) }
+function Env(t, e) { class s { constructor(t) { this.env = t } } return new class { constructor(t) { this.name = t, this.logs = [], this.isSurge = !1, this.isQuanX = "undefined" != typeof $task, this.isLoon = !1 } getdata(t) { let e = this.getval(t); if (/^@/.test(t)) { const [, s, i] = /^@(.*?)\.(.*?)$/.exec(t), r = s ? this.getval(s) : ""; if (r) try { const t = JSON.parse(r); e = t ? this.getval(i, t) : null } catch (t) { e = "" } } return e } setdata(t, e) { let s = !1; if (/^@/.test(e)) { const [, i, r] = /^@(.*?)\.(.*?)$/.exec(e), o = this.getval(i), h = i ? "null" === o ? null : o || "{}" : "{}"; try { const e = JSON.parse(h); this.setval(r, t, e), s = !0, this.setval(i, JSON.stringify(e)) } catch (e) { const o = {}; this.setval(r, t, o), s = !0, this.setval(i, JSON.stringify(o)) } } else s = this.setval(t, e); return s } getval(t) { return this.isQuanX ? $prefs.valueForKey(t) : "" } setval(t, e) { return this.isQuanX ? $prefs.setValueForKey(t, e) : "" } msg(e = t, s = "", i = "", r) { this.isQuanX && $notify(e, s, i, r) } get(t, e = (() => { })) { this.isQuanX && ("string" == typeof t && (t = { url: t }), t.method = "GET", $task.fetch(t).then(t => { e(null, t, t.body) }, t => e(t.error, null, null))) } post(t, e = (() => { })) { this.isQuanX && ("string" == typeof t && (t = { url: t }), t.method = "POST", $task.fetch(t).then(t => { e(null, t, t.body) }, t => e(t.error, null, null))) } done(t = {}) { this.isQuanX && $done(t) } }(t, e) }
