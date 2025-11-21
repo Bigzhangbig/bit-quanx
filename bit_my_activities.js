@@ -12,7 +12,7 @@ console.log("脚本开始运行");
 const CONFIG = {
     tokenKey: "bit_sc_token",
     listUrl: "https://qcbldekt.bit.edu.cn/api/transcript/course/signIn/list?page=1&limit=20&type=1",
-    qrBaseUrl: "https://qcbldekt.bit.edu.cn/qrcode/second/?course_id="
+    qrBaseUrl: "https://qcbldekt.bit.edu.cn/qrcode/event/?course_id="
 };
 
 (async () => {
@@ -121,8 +121,8 @@ function processItems(items) {
             $.msg(
                 $.name, 
                 `⚠️ ${item.action}提醒: ${item.title}`, 
-                `截止时间: ${item.deadline}\n${i===0 ? '已复制二维码链接，' : ''}点击跳转`,
-                {"open-url": qrUrl}
+                `截止时间: ${item.deadline}\n${i===0 ? '已复制二维码链接，' : ''}点击跳转小程序`,
+                {"open-url": "weixin://dl/business/?t=34E4TP288tr"}
             );
             
             console.log(`已通知: ${item.title} ${item.action}`);
