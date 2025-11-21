@@ -13,6 +13,7 @@
         "bit_sc_headers",
         "bit_sc_cache",
         "bit_sc_signup_course_id",
+        "bit_sc_blacklist",
         "bit_sc_debug",
         "bit_sc_pickup_mode",
         "bit_sc_random_delay",
@@ -33,6 +34,13 @@
           "val": "",
           "type": "text",
           "desc": "输入要报名的课程ID（数字），运行报名脚本时使用"
+        },
+        {
+          "id": "bit_sc_blacklist",
+          "name": "课程黑名单",
+          "val": "",
+          "type": "text",
+          "desc": "输入不想报名的课程ID，用逗号分隔"
         },
         {
           "id": "bit_sc_debug",
