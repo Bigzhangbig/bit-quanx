@@ -12,12 +12,9 @@
 const $ = new Env("北理工校园卡-获取Cookie");
 
 const CONFIG = {
-    // 复用第二课堂的 GitHub 配置
     githubTokenKey: "bit_sc_github_token",
     gistIdKey: "bit_sc_gist_id",
-    // 校园卡专用的 Gist 文件名配置 key
     gistFileNameKey: "bit_card_gist_filename",
-    // 默认文件名
     defaultFileName: "bit_card_cookies.json"
 };
 
@@ -27,56 +24,110 @@ const CONFIG = {
             await getCookie();
         } catch (e) {
             console.log(`[${$.name}] 脚本执行异常: ${e}`);
+            $.msg($.name, "脚本执行异常", e.toString());
         }
     }
     $done({});
 })();
 
 async function getCookie() {
-    // 调试日志
-    // console.log(`[${$.name}] 检测到请求: ${$request.url}`);
-    
     if ($request.headers) {
         const cookie = $request.headers['Cookie'] || $request.headers['cookie'];
         const url = $request.url;
         
-        // 提取 JSESSIONID
         let jsessionid = null;
         if (cookie) {
             const match = cookie.match(/JSESSIONID=([^;]+)/);
-            if (match) {
-                jsessionid = match[1];
-            }
+            if (match) jsessionid = match[1];
         }
 
-        // 提取 OpenID (从 URL 参数)
         let openid = null;
         if (url.includes("openid=")) {
             const match = url.match(/openid=([^&]+)/);
-            if (match) {
-                openid = match[1];
-            }
+            if (match) openid = match[1];
         }
 
         if (jsessionid && openid) {
-            const oldJsessionid = $.getdata("bit_card_jsessionid");
-            const oldOpenid = $.getdata("bit_card_openid");
-
-            if (jsessionid !== oldJsessionid || openid !== oldOpenid) {
-                // 更新本地数据
-                $.setdata(jsessionid, "bit_card_jsessionid");
-                $.setdata(openid, "bit_card_openid");
-                
-                console.log(`[${$.name}] 获取到新的凭证:\nJSESSIONID: ${jsessionid}\nOpenID: ${openid}`);
-                $.msg($.name, "获取校园卡凭证成功", "正在同步到 Gist...");
-
-                // 同步到 Gist
-                await updateGist(jsessionid, openid);
+            // 1. 获取 Gist 上的数据进行对比
+            const gistData = await getGist();
+            
+            let needUpdate = true;
+            if (gistData) {
+                if (gistData.jsessionid === jsessionid && gistData.openid === openid) {
+                    needUpdate = false;
+                    console.log(`[${$.name}] 凭证与 Gist 一致，跳过更新`);
+                }
             } else {
-                // console.log(`[${$.name}] 凭证未变化`);
+                console.log(`[${$.name}] 未能获取 Gist 数据或 Gist 为空，将执行强制更新`);
+            }
+
+            // 2. 根据对比结果决定是否更新
+            if (needUpdate) {
+                console.log(`[${$.name}] 检测到新凭证，准备更新 Gist...`);
+                console.log(`JSESSIONID: ${jsessionid}`);
+                console.log(`OpenID: ${openid}`);
+                
+                const success = await updateGist(jsessionid, openid);
+                if (success) {
+                    // 更新本地缓存 (可选)
+                    $.setdata(jsessionid, "bit_card_jsessionid");
+                    $.setdata(openid, "bit_card_openid");
+                    $.msg($.name, "凭证更新成功", "已同步到 GitHub Gist");
+                } else {
+                    $.msg($.name, "凭证更新失败", "同步到 Gist 失败，请查看日志");
+                }
             }
         }
     }
+}
+
+async function getGist() {
+    const githubToken = $.getdata(CONFIG.githubTokenKey);
+    const gistId = $.getdata(CONFIG.gistIdKey);
+    const filename = $.getdata(CONFIG.gistFileNameKey) || CONFIG.defaultFileName;
+
+    if (!githubToken || !gistId) return null;
+
+    const request = {
+        url: `https://api.github.com/gists/${gistId}`,
+        method: "GET",
+        headers: {
+            "Authorization": `token ${githubToken}`,
+            "User-Agent": "BIT-Card-Script",
+            "Accept": "application/vnd.github.v3+json"
+        }
+    };
+
+    return new Promise((resolve) => {
+        if ($.isQuanX) {
+            $task.fetch(request).then(
+                response => {
+                    if (response.statusCode === 200) {
+                        try {
+                            const body = JSON.parse(response.body);
+                            if (body.files && body.files[filename]) {
+                                resolve(JSON.parse(body.files[filename].content));
+                            } else {
+                                resolve(null);
+                            }
+                        } catch (e) {
+                            console.log(`[${$.name}] 解析 Gist 失败: ${e}`);
+                            resolve(null);
+                        }
+                    } else {
+                        console.log(`[${$.name}] 获取 Gist 失败: ${response.statusCode}`);
+                        resolve(null);
+                    }
+                },
+                reason => {
+                    console.log(`[${$.name}] 获取 Gist 出错: ${reason.error}`);
+                    resolve(null);
+                }
+            );
+        } else {
+            resolve(null);
+        }
+    });
 }
 
 async function updateGist(jsessionid, openid) {
@@ -85,9 +136,8 @@ async function updateGist(jsessionid, openid) {
     const filename = $.getdata(CONFIG.gistFileNameKey) || CONFIG.defaultFileName;
 
     if (!githubToken || !gistId) {
-        console.log(`[${$.name}] 未配置 GitHub Token 或 Gist ID，跳过 Gist 同步`);
-        $.msg($.name, "同步失败", "未配置 GitHub Token 或 Gist ID");
-        return;
+        $.msg($.name, "配置缺失", "请在 BoxJS 中配置 GitHub Token 和 Gist ID");
+        return false;
     }
 
     const content = JSON.stringify({
@@ -96,52 +146,40 @@ async function updateGist(jsessionid, openid) {
         updated_at: new Date().toISOString()
     }, null, 2);
 
-    const url = `https://api.github.com/gists/${gistId}`;
-    const method = "PATCH";
-    const headers = {
-        "Authorization": `token ${githubToken}`,
-        "User-Agent": "BIT-Card-Script",
-        "Accept": "application/vnd.github.v3+json",
-        "Content-Type": "application/json"
-    };
-    
-    const body = JSON.stringify({
-        files: {
-            [filename]: {
-                content: content
+    const request = {
+        url: `https://api.github.com/gists/${gistId}`,
+        method: "PATCH",
+        headers: {
+            "Authorization": `token ${githubToken}`,
+            "User-Agent": "BIT-Card-Script",
+            "Accept": "application/vnd.github.v3+json",
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            files: {
+                [filename]: { content: content }
             }
-        }
-    });
-
-    const myRequest = {
-        url: url,
-        method: method,
-        headers: headers,
-        body: body
+        })
     };
 
     return new Promise((resolve) => {
         if ($.isQuanX) {
-            $task.fetch(myRequest).then(
+            $task.fetch(request).then(
                 response => {
                     if (response.statusCode >= 200 && response.statusCode < 300) {
-                        console.log(`[${$.name}] Gist同步成功`);
-                        $.msg($.name, "Gist同步成功", "校园卡凭证已同步到 GitHub Gist");
+                        resolve(true);
                     } else {
-                        console.log(`[${$.name}] Gist同步失败: ${response.statusCode} ${response.body}`);
-                        $.msg($.name, "Gist同步失败", `状态码: ${response.statusCode}`);
+                        console.log(`[${$.name}] Gist 更新失败: ${response.statusCode} ${response.body}`);
+                        resolve(false);
                     }
-                    resolve();
                 },
                 reason => {
-                    console.log(`[${$.name}] Gist同步出错: ${reason.error}`);
-                    $.msg($.name, "Gist同步出错", reason.error);
-                    resolve();
+                    console.log(`[${$.name}] Gist 更新出错: ${reason.error}`);
+                    resolve(false);
                 }
             );
         } else {
-            console.log(`[${$.name}] 非QuanX环境，暂不支持Gist同步`);
-            resolve();
+            resolve(false);
         }
     });
 }
