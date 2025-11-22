@@ -79,8 +79,7 @@ async function checkAndSignIn() {
             console.log(`\nChecking Course: [${course.course_id}] ${course.course_title}`);
             console.log(`Status: ${course.status_label} (${course.status})`);
             
-            // status: 0 (待签到), 1 (待签退)
-            // 简单的时间预判，具体以 info 接口为准
+            // status: 0 (待签到), 1 (待签退), 2 (补卡), 3 (待完成), 4 (待审核)
             let potentialAction = false;
             if (course.status === 0 || course.status === 1) {
                 potentialAction = true;
@@ -204,7 +203,7 @@ function getRandomCoordinate(lat, lon, rangeMeters) {
     // 1度经度 ≈ 111km * cos(lat)
     
     // 稍微缩小一点范围，确保在圈内
-    const safeRange = rangeMeters * 0.8; 
+    const safeRange = rangeMeters * 0.6; 
     
     const r = safeRange / 111000; // 转换为度数的大致半径
     const u = Math.random();

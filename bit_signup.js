@@ -19,6 +19,7 @@ const CONFIG = {
     // APIs
     applyUrl: "https://qcbldekt.bit.edu.cn/api/course/apply",
     myListUrl: "https://qcbldekt.bit.edu.cn/api/transcript/course/signIn/list?page=1&limit=20&type=1",
+    infoUrl: "https://qcbldekt.bit.edu.cn/api/transcript/checkIn/info",
     
     // Constants
     templateId: "2GNFjVv2S7xYnoWeIxGsJGP1Fu2zSs28R6mZI7Fc2kU",
@@ -133,23 +134,34 @@ async function main() {
                 console.log(`✅ 报名成功: ${result.message}`);
                 hasChange = true;
                 
-                // 报名成功后，再次获取我的课程列表，查看状态（签到/签退/完成）
-                // 稍微延迟一下等待服务器更新
+                // 报名成功后，获取课程详情查看状态
                 await new Promise(r => setTimeout(r, 2000));
-                const updatedMyCourses = await getMyCourses(headers);
-                const courseInfo = updatedMyCourses.find(c => c.course_id === courseId);
+                const courseInfo = await getCourseInfo(courseId, headers);
                 
                 let statusMsg = "报名成功";
                 let subMsg = "";
                 
                 if (courseInfo) {
                     const statusLabel = courseInfo.status_label || "";
-                    statusMsg = `报名成功 | ${statusLabel}`;
+                    if (statusLabel) statusMsg = `报名成功 | ${statusLabel}`;
                     
-                    if (statusLabel.includes("签到")) {
-                        subMsg = `\n⏰ 签到时间: ${courseInfo.sign_in_start_time} - ${courseInfo.sign_in_end_time}`;
-                    } else if (statusLabel.includes("签退")) {
-                        subMsg = `\n⏰ 签退时间: ${courseInfo.sign_out_start_time} - ${courseInfo.sign_out_end_time}`;
+                    // 根据 status 显示对应的时间
+                    if (courseInfo.status === 0 && courseInfo.sign_in_start_time) {
+                        subMsg += `\n⏰ 签到: ${courseInfo.sign_in_start_time} - ${courseInfo.sign_in_end_time}`;
+                    } else if (courseInfo.status === 1 && courseInfo.sign_out_start_time) {
+                        subMsg += `\n⏰ 签退: ${courseInfo.sign_out_start_time} - ${courseInfo.sign_out_end_time}`;
+                    } else {
+                        // 如果没有 status 字段，或者 status 不是 0/1
+                        // 检查是否有时间字段，如果有，都显示出来 (兼容旧逻辑)
+                        // 但如果 statusLabel 是 "已结束"，可能就不需要显示了
+                        if (!statusLabel.includes("已结束") && !statusLabel.includes("已完成")) {
+                             if (courseInfo.sign_in_start_time && courseInfo.sign_in_end_time) {
+                                subMsg += `\n⏰ 签到: ${courseInfo.sign_in_start_time} - ${courseInfo.sign_in_end_time}`;
+                            }
+                            if (courseInfo.sign_out_start_time && courseInfo.sign_out_end_time) {
+                                subMsg += `\n⏰ 签退: ${courseInfo.sign_out_start_time} - ${courseInfo.sign_out_end_time}`;
+                            }
+                        }
                     }
                 }
 
@@ -231,6 +243,19 @@ async function getMyCourses(headers) {
         console.log("获取我的课程失败: " + e);
     }
     return [];
+}
+
+async function getCourseInfo(courseId, headers) {
+    const url = `${CONFIG.infoUrl}?course_id=${courseId}`;
+    try {
+        const data = await httpGet(url, headers);
+        if (data && data.code === 200) {
+            return data.data;
+        }
+    } catch (e) {
+        console.log(`获取课程详情失败: ${e}`);
+    }
+    return null;
 }
 
 async function autoSignup(courseId, headers) {
