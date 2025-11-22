@@ -14,6 +14,7 @@ const CONFIG = {
     tokenKey: "bit_sc_token",
     headersKey: "bit_sc_headers",
     signupListKey: "bit_sc_signup_list", // 待报名列表 Key
+    notifyNoUpdateKey: "bit_sc_notify_no_update", // 无更新通知开关
     
     // APIs
     applyUrl: "https://qcbldekt.bit.edu.cn/api/course/apply",
@@ -32,6 +33,8 @@ const CONFIG = {
 async function main() {
     const token = $.getdata(CONFIG.tokenKey);
     const savedHeaders = $.getdata(CONFIG.headersKey);
+    const isNotifyNoUpdate = $.getdata(CONFIG.notifyNoUpdateKey) === "true";
+    let hasNotified = false;
     
     if (!token) {
         $.msg($.name, "❌ 未找到 Token", "请先运行 bit_cookie.js 获取 Token");
@@ -57,6 +60,9 @@ async function main() {
 
     if (!Array.isArray(signupList) || signupList.length === 0) {
         console.log("待报名列表为空");
+        if (isNotifyNoUpdate) {
+            $.msg($.name, "🔍 检查完成", "待报名列表为空");
+        }
         $.done();
         return;
     }
@@ -103,6 +109,7 @@ async function main() {
         if (diff > CONFIG.maxWaitTime) {
             console.log(`⏳ 距离报名开始还有 ${Math.round(diff / 60000)} 分钟，超过20分钟，跳过本次执行`);
             $.msg($.name, "⏳ 等待报名", `课程：${title}\n时间：${timeStr}\n距离开始还有 ${Math.round(diff / 60000)} 分钟，稍后重试。`);
+            hasNotified = true;
             newList.push(item);
         } else {
             let result;
@@ -147,12 +154,14 @@ async function main() {
                 }
 
                 $.msg($.name, `✅ ${statusMsg}`, `课程: ${title}\nID: ${courseId}${subMsg}`, { "open-url": "weixin://dl/business/?t=34E4TP288tr" });
+                hasNotified = true;
 
             } else {
                 console.log(`❌ 报名失败: ${result.message}`);
                 // 失败则保留，下次重试
                 newList.push(item);
                 $.msg($.name, "❌ 报名失败", `课程: ${title}\nID: ${courseId}\n原因: ${result.message}`);
+                hasNotified = true;
             }
         }
     }
@@ -161,6 +170,10 @@ async function main() {
     if (hasChange) {
         $.setdata(JSON.stringify(newList), CONFIG.signupListKey);
         console.log("已更新待报名列表");
+    }
+    
+    if (!hasNotified && isNotifyNoUpdate) {
+        $.msg($.name, "🔍 检查完成", `检查了 ${signupList.length} 个任务，无新报名动作。`);
     }
     
     $.done();
