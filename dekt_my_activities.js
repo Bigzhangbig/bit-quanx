@@ -124,7 +124,8 @@ async function processItems(items, headers) {
                     const signOutEnd = info ? info.sign_out_end_time : item.sign_out_end_time;
                     
                     // 获取分类名称
-                    const category = CONFIG.categories.find(c => c.id === item.transcript_index_id);
+                    const catId = (info && info.transcript_index_id) || item.transcript_index_id;
+                    const category = CONFIG.categories.find(c => c.id === catId);
                     const categoryName = category ? category.name : "未知分类";
 
                     notifyItems.push({

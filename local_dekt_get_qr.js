@@ -17,8 +17,17 @@ const CONFIG = {
     headersKey: "bit_sc_headers",
     // 签到列表接口
     listUrl: "https://qcbldekt.bit.edu.cn/api/transcript/course/signIn/list?page=1&limit=20&type=1",
+    infoUrl: "https://qcbldekt.bit.edu.cn/api/transcript/checkIn/info",
     qrBaseUrl: "https://qcbldekt.bit.edu.cn/qrcode/event/?course_id=",
-    saveDir: path.join(__dirname, 'qrcodes')
+    saveDir: path.join(__dirname, 'qrcodes'),
+    categories: [
+        { id: 1, name: "理想信念" },
+        { id: 2, name: "科学素养" },
+        { id: 3, name: "社会贡献" },
+        { id: 4, name: "团队协作" },
+        { id: 5, name: "文化互鉴" },
+        { id: 6, name: "健康生活" }
+    ]
 };
 
 // 确保保存目录存在
@@ -75,6 +84,14 @@ if (!fs.existsSync(CONFIG.saveDir)) {
                     const title = item.courseName || item.course_title;
                     const statusLabel = item.status_label || item.status;
                     
+                    // 获取详细信息
+                    const info = await getCourseInfo(courseId, headers);
+                    
+                    // 获取分类名称
+                    const catId = (info && info.transcript_index_id) || item.transcript_index_id;
+                    const category = CONFIG.categories.find(c => c.id === catId);
+                    const categoryName = category ? category.name : "未知分类";
+
                     // 构造二维码链接
                     const qrUrl = `${CONFIG.qrBaseUrl}${courseId}`;
                     
@@ -86,6 +103,7 @@ if (!fs.existsSync(CONFIG.saveDir)) {
                     console.log(`\n----------------------------------------`);
                     console.log(`活动名称: ${title}`);
                     console.log(`活动ID:   ${courseId}`);
+                    console.log(`活动分类: ${categoryName}`);
                     console.log(`状态:     ${statusLabel}`);
                     
                     // 判断完成方式
@@ -193,3 +211,33 @@ if (!fs.existsSync(CONFIG.saveDir)) {
         }
     });
 })();
+
+function httpGet(url, headers) {
+    return new Promise((resolve, reject) => {
+        $.get({ url, headers }, (err, resp, data) => {
+            if (err) {
+                reject(err);
+            } else {
+                try {
+                    resolve(JSON.parse(data));
+                } catch (e) {
+                    resolve(data);
+                }
+            }
+        });
+    });
+}
+
+async function getCourseInfo(courseId, headers) {
+    const url = `${CONFIG.infoUrl}?course_id=${courseId}`;
+    try {
+        const data = await httpGet(url, headers);
+        if (data && data.code === 200) {
+            return data.data;
+        }
+        return null;
+    } catch (e) {
+        console.log(`获取课程详情失败: ${e}`);
+        return null;
+    }
+}
