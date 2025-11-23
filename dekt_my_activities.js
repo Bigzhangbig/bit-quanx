@@ -13,6 +13,7 @@ console.log("脚本开始运行");
 const CONFIG = {
     tokenKey: "bit_sc_token",
     listUrl: "https://qcbldekt.bit.edu.cn/api/transcript/course/signIn/list?page=1&limit=20&type=1",
+    infoUrl: "https://qcbldekt.bit.edu.cn/api/transcript/checkIn/info",
     qrBaseUrl: "https://qcbldekt.bit.edu.cn/qrcode/event/?course_id="
 };
 
@@ -43,7 +44,7 @@ async function checkActivities() {
     try {
         const res = await httpGet(CONFIG.listUrl, headers);
         if (res.code === 200 && res.data && res.data.items) {
-            processItems(res.data.items);
+            await processItems(res.data.items, headers);
         } else {
             console.log("获取列表失败或列表为空: " + JSON.stringify(res));
         }
@@ -73,7 +74,21 @@ function httpGet(url, headers) {
     });
 }
 
-function processItems(items) {
+async function getCourseInfo(courseId, headers) {
+    const url = `${CONFIG.infoUrl}?course_id=${courseId}`;
+    try {
+        const data = await httpGet(url, headers);
+        if (data && data.code === 200) {
+            return data.data;
+        }
+        return null;
+    } catch (e) {
+        console.log(`获取课程详情失败: ${e}`);
+        return null;
+    }
+}
+
+async function processItems(items, headers) {
     const now = new Date();
     let notifyItems = [];
 
@@ -93,15 +108,22 @@ function processItems(items) {
                 
                 // 如果当前时间在结束时间之前
                 if (now < endTime) {
+                    // 获取详细信息以得到准确的开始时间
+                    const info = await getCourseInfo(item.course_id, headers);
+                    const signInStart = info ? info.sign_in_start_time : item.sign_in_start_time;
+                    const signInEnd = info ? info.sign_in_end_time : item.sign_in_end_time;
+                    const signOutStart = info ? info.sign_out_start_time : item.sign_out_start_time;
+                    const signOutEnd = info ? info.sign_out_end_time : item.sign_out_end_time;
+
                     notifyItems.push({
                         title: item.course_title,
                         action: isSignIn ? "签到" : "签退",
                         deadline: endTimeStr,
                         id: item.course_id,
-                        signInStart: item.sign_in_start_time,
-                        signInEnd: item.sign_in_end_time,
-                        signOutStart: item.sign_out_start_time,
-                        signOutEnd: item.sign_out_end_time
+                        signInStart: signInStart,
+                        signInEnd: signInEnd,
+                        signOutStart: signOutStart,
+                        signOutEnd: signOutEnd
                     });
                 }
             }
