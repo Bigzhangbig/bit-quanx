@@ -97,7 +97,11 @@ function processItems(items) {
                         title: item.course_title,
                         action: isSignIn ? "签到" : "签退",
                         deadline: endTimeStr,
-                        id: item.course_id
+                        id: item.course_id,
+                        signInStart: item.sign_in_start_time,
+                        signInEnd: item.sign_in_end_time,
+                        signOutStart: item.sign_out_start_time,
+                        signOutEnd: item.sign_out_end_time
                     });
                 }
             }
@@ -108,23 +112,35 @@ function processItems(items) {
         // 按截止时间排序，优先处理最早截止的
         notifyItems.sort((a, b) => new Date(a.deadline.replace(/-/g, '/')) - new Date(b.deadline.replace(/-/g, '/')));
 
+        // 打印所有待参加活动的签到时间段和签退时间段
+        console.log("待参加活动列表详情:");
+        notifyItems.forEach(item => {
+            console.log(`[${item.id}] [${item.action}] ${item.title}`);
+            console.log(`  签到时间: ${item.signInStart || '未设置'} - ${item.signInEnd || '未设置'}`);
+            console.log(`  签退时间: ${item.signOutStart || '未设置'} - ${item.signOutEnd || '未设置'}`);
+        });
+
         // 1. 处理第一个（最紧急）活动
         const firstItem = notifyItems[0];
         const qrUrl = `${CONFIG.qrBaseUrl}${firstItem.id}`;
         const quickChartUrl = `https://quickchart.io/qr?text=${encodeURIComponent(qrUrl)}`;
+        
+        let msgBody = `截止: ${firstItem.deadline}`;
+        msgBody += `\n签到: ${firstItem.signInStart || '未设置'} - ${firstItem.signInEnd || '未设置'}`;
+        msgBody += `\n签退: ${firstItem.signOutStart || '未设置'} - ${firstItem.signOutEnd || '未设置'}`;
 
         $.msg(
             $.name, 
-            `⚠️ ${firstItem.action}提醒: ${firstItem.title}`, 
-            `截止时间: ${firstItem.deadline}\n点击查看二维码`,
+            `⚠️ ${firstItem.action}提醒: [${firstItem.id}] ${firstItem.title}`, 
+            msgBody,
             {"open-url": quickChartUrl}
         );
-        console.log(`已通知: ${firstItem.title} ${firstItem.action}`);
+        console.log(`已通知: [${firstItem.id}] ${firstItem.title} ${firstItem.action}`);
 
         // 2. 其余活动简写为一条通知
         if (notifyItems.length > 1) {
             const restItems = notifyItems.slice(1);
-            const summary = restItems.map(item => `[${item.action}] ${item.title}`).join('\n');
+            const summary = restItems.map(item => `[${item.id}] [${item.action}] ${item.title}`).join('\n');
             
             $.msg(
                 $.name,
