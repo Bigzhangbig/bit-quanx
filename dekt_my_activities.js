@@ -124,10 +124,17 @@ async function processItems(items, headers) {
                     const signOutEnd = info ? info.sign_out_end_time : item.sign_out_end_time;
                     
                     // 获取分类名称
+                    // 优先使用 transcript_index_id，如果没有则尝试使用 transcript_name 匹配
+                    let category = null;
                     const catId = (info && info.transcript_index_id) || item.transcript_index_id;
-                    // 使用弱等于，兼容字符串和数字类型的ID
-                    const category = CONFIG.categories.find(c => c.id == catId);
-                    const categoryName = category ? category.name : "未知分类";
+                    
+                    if (catId) {
+                        category = CONFIG.categories.find(c => c.id == catId);
+                    } else if (info && info.transcript_name) {
+                        category = CONFIG.categories.find(c => c.name === info.transcript_name);
+                    }
+                    
+                    const categoryName = category ? category.name : (info && info.transcript_name) || "未知分类";
 
                     notifyItems.push({
                         title: item.course_title,
