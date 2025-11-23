@@ -116,7 +116,24 @@ if (!fs.existsSync(CONFIG.saveDir)) {
                         let inTimeRange = false;
                         let timeMsg = "";
 
-                        if (signInStart && signInEnd && now >= signInStart && now <= signInEnd) {
+                        const isSignIn = statusLabel && statusLabel.includes("待签到");
+                        const isSignOut = statusLabel && statusLabel.includes("待签退");
+
+                        if (isSignIn) {
+                            if (!signInEnd || now <= signInEnd) {
+                                inTimeRange = true;
+                                timeMsg = "🟢 当前状态为待签到";
+                            } else {
+                                timeMsg = "🔴 已过签到截止时间";
+                            }
+                        } else if (isSignOut) {
+                            if (!signOutEnd || now <= signOutEnd) {
+                                inTimeRange = true;
+                                timeMsg = "🟢 当前状态为待签退";
+                            } else {
+                                timeMsg = "🔴 已过签退截止时间";
+                            }
+                        } else if (signInStart && signInEnd && now >= signInStart && now <= signInEnd) {
                             inTimeRange = true;
                             timeMsg = "🟢 当前在签到时间内";
                         } else if (signOutStart && signOutEnd && now >= signOutStart && now <= signOutEnd) {
