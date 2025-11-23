@@ -63,9 +63,6 @@ async function main() {
 
     if (!Array.isArray(signupList) || signupList.length === 0) {
         console.log("待报名列表为空");
-        if (isNotifyNoUpdate) {
-            $.msg($.name, "🔍 检查完成", "待报名列表为空");
-        }
         $.done();
         return;
     }
@@ -111,8 +108,6 @@ async function main() {
         // 逻辑判断
         if (diff > CONFIG.maxWaitTime) {
             console.log(`⏳ 距离报名开始还有 ${Math.round(diff / 60000)} 分钟，超过20分钟，跳过本次执行`);
-            $.msg($.name, "⏳ 等待报名", `课程：${title}\n时间：${timeStr}\n距离开始还有 ${Math.round(diff / 60000)} 分钟，稍后重试。`);
-            hasNotified = true;
             newList.push(item);
         } else {
             let result;
@@ -184,10 +179,6 @@ async function main() {
     if (hasChange) {
         $.setdata(JSON.stringify(newList), CONFIG.signupListKey);
         console.log("已更新待报名列表");
-    }
-    
-    if (!hasNotified && isNotifyNoUpdate) {
-        $.msg($.name, "🔍 检查完成", `检查了 ${signupList.length} 个任务，无新报名动作。`);
     }
     
     $.done();
