@@ -89,7 +89,8 @@ if (!fs.existsSync(CONFIG.saveDir)) {
                     
                     // 获取分类名称
                     const catId = (info && info.transcript_index_id) || item.transcript_index_id;
-                    const category = CONFIG.categories.find(c => c.id === catId);
+                    // 使用弱等于，兼容字符串和数字类型的ID
+                    const category = CONFIG.categories.find(c => c.id == catId);
                     const categoryName = category ? category.name : "未知分类";
 
                     // 构造二维码链接
