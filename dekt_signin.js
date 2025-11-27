@@ -90,32 +90,31 @@ async function checkAndSignIn() {
     // - 仅当课程完成标识为 time 时输出时长/签到签退
     // - 日志顺序：先输出签到，再输出签退
     // - 执行顺序：先尝试签到，再尝试签退
-    if (autoSignAll && Array.isArray(courses) && courses.length > 0) {
+    if (Array.isArray(courses) && courses.length > 0) {
         for (const course of courses) {
             const info = await getCourseInfo(course.course_id, headers);
             if (!info) continue;
             const meta = await getCourseMeta(course.course_id, headers);
-            if (!meta || meta.completionType !== 'time') {
-                // 非 time 类型：不输出时长、也不进行签到签退
-                continue;
-            }
             const title = course.course_title || info.course_title || String(course.course_id);
-            const duration = meta.duration;
+            const duration = meta ? meta.duration : null;
             const siWin = isInWindow(info, 'signIn');
             const soWin = isInWindow(info, 'signOut');
-            // 日志：先签到，再签退，并加分割线
+            // 日志始终输出（先签到再签退），非 time 也输出并标注跳过
             console.log(`===== 课程 ${course.course_id} | ${title} =====`);
-            console.log(`时长: ${duration != null ? duration : '未知'}`);
+            console.log(`时长: ${duration != null ? duration : '未知'}${meta && meta.completionType !== 'time' ? '（非time类型，跳过执行）' : ''}`);
             console.log(`签到窗口: ${siWin ? '是' : '否'}${info.sign_in_start_time ? ` (${info.sign_in_start_time} - ${info.sign_in_end_time})` : ''}`);
             console.log(`签退窗口: ${soWin ? '是' : '否'}${info.sign_out_start_time ? ` (${info.sign_out_start_time} - ${info.sign_out_end_time})` : ''}`);
             console.log(`----------------------------------------------`);
-            if (siWin) {
-                $.msg($.name, `处于签到窗口`, `${title}`);
-                await executeSign(course.course_id, info, headers, '签到', title);
-            }
-            if (soWin) {
-                $.msg($.name, `处于签退窗口`, `${title}`);
-                await executeSign(course.course_id, info, headers, '签退', title);
+            // 仅在开启 autoSignAll 且为 time 类型时执行
+            if (autoSignAll && meta && meta.completionType === 'time') {
+                if (siWin) {
+                    $.msg($.name, `处于签到窗口`, `${title}`);
+                    await executeSign(course.course_id, info, headers, '签到', title);
+                }
+                if (soWin) {
+                    $.msg($.name, `处于签退窗口`, `${title}`);
+                    await executeSign(course.course_id, info, headers, '签退', title);
+                }
             }
         }
     } else if (targetIds.length > 0) {
@@ -124,27 +123,25 @@ async function checkAndSignIn() {
             const info = await getCourseInfo(tId, headers);
             if (!info) continue;
             const meta = await getCourseMeta(tId, headers);
-            if (!meta || meta.completionType !== 'time') {
-                // 非 time 类型：不输出时长、不进行签到签退
-                continue;
-            }
             const title = info.course_title || String(tId);
-            const duration = meta.duration;
+            const duration = meta ? meta.duration : null;
             const soWin = isInWindow(info, 'signOut');
             const siWin = isInWindow(info, 'signIn');
             // 日志分割线 + 先签到后签退
             console.log(`===== 课程 ${tId} | ${title} =====`);
-            console.log(`时长: ${duration != null ? duration : '未知'}`);
+            console.log(`时长: ${duration != null ? duration : '未知'}${meta && meta.completionType !== 'time' ? '（非time类型，跳过执行）' : ''}`);
             console.log(`签到窗口: ${siWin ? '是' : '否'}${info.sign_in_start_time ? ` (${info.sign_in_start_time} - ${info.sign_in_end_time})` : ''}`);
             console.log(`签退窗口: ${soWin ? '是' : '否'}${info.sign_out_start_time ? ` (${info.sign_out_start_time} - ${info.sign_out_end_time})` : ''}`);
             console.log(`----------------------------------------------`);
-            if (siWin) {
-                $.msg($.name, `处于签到时间窗口`, `课程: ${title}`);
-                await executeSign(tId, info, headers, '签到', title);
-            }
-            if (soWin) {
-                $.msg($.name, `处于签退时间窗口`, `课程: ${title}`);
-                await executeSign(tId, info, headers, '签退', title);
+            if (meta && meta.completionType === 'time') {
+                if (siWin) {
+                    $.msg($.name, `处于签到时间窗口`, `课程: ${title}`);
+                    await executeSign(tId, info, headers, '签到', title);
+                }
+                if (soWin) {
+                    $.msg($.name, `处于签退时间窗口`, `课程: ${title}`);
+                    await executeSign(tId, info, headers, '签退', title);
+                }
             }
         }
     }
