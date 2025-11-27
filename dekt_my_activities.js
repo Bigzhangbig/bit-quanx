@@ -16,9 +16,12 @@ const CONFIG = {
     // 旧的 infoUrl 仅提供签到/签退时间
     // infoUrl: "https://qcbldekt.bit.edu.cn/api/transcript/checkIn/info",
     // 新增：按职责分离
+    // 已确认 REST 详情提供签到/签退时间，移除单独的 checkInInfo 请求
     checkInInfoUrl: "https://qcbldekt.bit.edu.cn/api/transcript/checkIn/info",
-    courseInfoUrl: "https://qcbldekt.bit.edu.cn/api/transcript/course/info",
-    myCourseListUrl: "https://qcbldekt.bit.edu.cn/api/transcript/course/list/my?page=1&limit=200",
+    // 使用新的 REST 风格课程详情接口
+    courseInfoUrlRest: "https://qcbldekt.bit.edu.cn/api/course/info/",
+    // 我的课程列表：使用新路径（旧路径保留在代码兜底处理中）
+    myCourseListUrl: "https://qcbldekt.bit.edu.cn/api/course/list/my?page=1&limit=200",
     qrBaseUrl: "https://qcbldekt.bit.edu.cn/qrcode/event/?course_id=",
     categories: [
         { id: 1, name: "理想信念" },
@@ -33,7 +36,8 @@ const CONFIG = {
 // 内存缓存，减少接口请求次数
 const CACHE = {
     myCourseList: null,
-    myCourseListFetchedAt: 0
+    myCourseListFetchedAt: 0,
+    // legacyCheckInFailed 已移除
 };
 
 (async () => {
@@ -101,10 +105,18 @@ async function getMyCourseList(headers) {
         return CACHE.myCourseList;
     }
     try {
-        const data = await httpGet(CONFIG.myCourseListUrl, headers);
+        // 新接口
+        let usedUrl = CONFIG.myCourseListUrl;
+        let data = await httpGet(usedUrl, headers);
+        // 若失败则尝试旧接口
+        if (!(data && data.code === 200)) {
+            usedUrl = "https://qcbldekt.bit.edu.cn/api/transcript/course/list/my?page=1&limit=200";
+            data = await httpGet(usedUrl, headers);
+        }
         if (data && data.code === 200 && data.data && Array.isArray(data.data.items)) {
             CACHE.myCourseList = data.data.items;
             CACHE.myCourseListFetchedAt = now;
+            console.log(`[myCourseList] 使用接口: ${usedUrl}，返回 ${CACHE.myCourseList.length} 条`);
             return CACHE.myCourseList;
         }
     } catch (e) {
@@ -118,37 +130,37 @@ async function getMyCourseList(headers) {
 // 2) course/info 获取 duration/transcript 等元数据
 // 3) 若仍缺失 duration，再从 course/list/my 兜底补齐
 async function getCourseInfo(courseId, headers) {
-    const result = {};
-    // 1) 签到/签退时间段
-    try {
-        const checkIn = await httpGet(`${CONFIG.checkInInfoUrl}?course_id=${courseId}`, headers);
-        if (checkIn && checkIn.code === 200 && checkIn.data) {
-            Object.assign(result, checkIn.data);
+    const result = { _source: {} };
+    let haveDuration = false;
+
+    // 1) 获取课程详情（REST），包含签到/签退时间 + 时长
+    if (!haveDuration) {
+        try {
+            const rest = await httpGet(`${CONFIG.courseInfoUrlRest}${courseId}`, headers);
+            if (rest && rest.code === 200 && rest.data) {
+                const { sign_in_start_time, sign_in_end_time, sign_out_start_time, sign_out_end_time } = result;
+                Object.assign(result, rest.data);
+                // 保留 legacy 已获取的签到时间段
+                if (sign_in_start_time) result.sign_in_start_time = sign_in_start_time;
+                if (sign_in_end_time) result.sign_in_end_time = sign_in_end_time;
+                if (sign_out_start_time) result.sign_out_start_time = sign_out_start_time;
+                if (sign_out_end_time) result.sign_out_end_time = sign_out_end_time;
+                if (!result._source.courseInfo) result._source.courseInfo = 'rest'; else result._source.courseInfo += '+rest';
+                if (rest.data.duration != null && !result._source.duration) {
+                    result._source.duration = 'rest.duration';
+                    haveDuration = true;
+                }
+                console.log(`[courseInfo] 使用 REST 接口获取成功(补齐): id=${courseId}`);
+            } else {
+                console.log(`[courseInfo] REST 接口返回异常: id=${courseId}`);
+            }
+        } catch (e) {
+            console.log(`[courseInfo] REST 接口请求异常: ${e}`);
         }
-    } catch (e) {
-        console.log(`获取签到详情失败: ${e}`);
     }
 
-    // 2) 课程详情（补齐时长/分类）
-    try {
-        const course = await httpGet(`${CONFIG.courseInfoUrl}?course_id=${courseId}`, headers);
-        if (course && course.code === 200 && course.data) {
-            // 以 checkIn 的时间段为准，其他元数据从 course 补齐
-            const { 
-                sign_in_start_time, sign_in_end_time, 
-                sign_out_start_time, sign_out_end_time 
-            } = result;
-            Object.assign(result, course.data);
-            if (sign_in_start_time) result.sign_in_start_time = sign_in_start_time;
-            if (sign_in_end_time) result.sign_in_end_time = sign_in_end_time;
-            if (sign_out_start_time) result.sign_out_start_time = sign_out_start_time;
-            if (sign_out_end_time) result.sign_out_end_time = sign_out_end_time;
-        }
-    } catch (e) {
-        console.log(`获取课程详情失败: ${e}`);
-    }
 
-    // 3) 兜底：我的课程列表
+    // 2) 兜底：我的课程列表（仅在前面无 duration 时）
     if (result.duration == null) {
         try {
             const items = await getMyCourseList(headers);
@@ -158,15 +170,35 @@ async function getCourseInfo(courseId, headers) {
             });
             if (found) {
                 if (found.duration != null) result.duration = found.duration;
+                if (found.duration != null) result._source.duration = 'myCourseList.duration';
                 if (result.transcript_index_id == null && found.transcript_index_id != null) {
                     result.transcript_index_id = found.transcript_index_id;
                 }
                 if (result.transcript_name == null && found.transcript_name != null) {
                     result.transcript_name = found.transcript_name;
                 }
+                console.log(`[duration] 兜底使用 myCourseList: id=${courseId}`);
             }
         } catch (e) {
             console.log(`从我的课程列表兜底获取时长失败: ${e}`);
+        }
+    }
+
+    // 3) 最终兜底：尝试从 transcript_index_type.duration 或 completion_flag_text 解析
+    if (result.duration == null) {
+        try {
+            if (result.transcript_index_type && result.transcript_index_type.duration != null) {
+                result.duration = result.transcript_index_type.duration;
+                result._source.duration = 'transcript_index_type.duration';
+            } else if (result.completion_flag_text) {
+                const m = String(result.completion_flag_text).match(/(\d{1,3})\s*分钟/);
+                if (m) {
+                    result.duration = parseInt(m[1], 10);
+                    result._source.duration = 'completion_flag_text';
+                }
+            }
+        } catch (e) {
+            console.log(`从元数据提取时长失败: ${e}`);
         }
     }
 
@@ -200,17 +232,28 @@ async function processItems(items, headers) {
                     const signOutStart = info ? info.sign_out_start_time : item.sign_out_start_time;
                     const signOutEnd = info ? info.sign_out_end_time : item.sign_out_end_time;
                     
-                    // 获取分类名称：优先 transcript_index_id，其次 transcript_name
+                    // 获取分类名称：优先 transcript_index_id，其次 transcript_name（或 transcript_index.transcript_name）
                     let category = null;
                     const catId = (info && info.transcript_index_id) || item.transcript_index_id;
                     if (catId != null) {
                         category = CONFIG.categories.find(c => String(c.id) === String(catId));
                     } else if (info && info.transcript_name) {
                         category = CONFIG.categories.find(c => c.name === info.transcript_name);
+                    } else if (info && info.transcript_index && info.transcript_index.transcript_name) {
+                        category = CONFIG.categories.find(c => c.name === info.transcript_index.transcript_name);
                     }
                     
-                    const categoryName = category ? category.name : (info && info.transcript_name) || "未知分类";
-                    const duration = (info && info.duration) != null ? info.duration : (item && item.duration);
+                    const categoryName = category ? category.name : (info && info.transcript_name) || (info && info.transcript_index && info.transcript_index.transcript_name) || "未知分类";
+                    // 优先 info.duration；其次从 my list/item；最后 transcript_index_type.duration 或 completion_flag_text
+                    let duration = null;
+                    if (info && info.duration != null) duration = info.duration;
+                    else if (item && item.duration != null) duration = item.duration;
+                    else if (info && info.transcript_index_type && info.transcript_index_type.duration != null) duration = info.transcript_index_type.duration;
+                    else if (info && info.completion_flag_text) {
+                        const m = String(info.completion_flag_text).match(/(\d{1,3})\s*分钟/);
+                        if (m) duration = parseInt(m[1], 10);
+                    }
+                    const durationSource = (info && info._source && info._source.duration) || (item && item.duration != null ? 'signInList.duration' : null) || 'unknown';
 
                     notifyItems.push({
                         title: item.course_title,
@@ -223,7 +266,8 @@ async function processItems(items, headers) {
                         signOutEnd: signOutEnd,
                         category: categoryName,
                         statusLabel: item.status_label,
-                        duration: duration
+                        duration: duration,
+                        durationSource: durationSource
                     });
                 }
             }
@@ -240,7 +284,32 @@ async function processItems(items, headers) {
             console.log(`【${item.category} | ${item.statusLabel}】[${item.id}] [${item.action}] ${item.title}`);
             console.log(`  签到时间: ${item.signInStart || '未设置'} - ${item.signInEnd || '未设置'}`);
             console.log(`  签退时间: ${item.signOutStart || '未设置'} - ${item.signOutEnd || '未设置'}`);
-            console.log(`  时长: ${item.duration != null ? item.duration : '未知'}`);
+            let ds = '';
+            if (item.duration == null) {
+                console.log('  时长: 未知');
+                return;
+            }
+            // rest.duration 不显示来源；其它来源简化标签
+            switch (item.durationSource) {
+                case 'rest.duration':
+                    ds = '';
+                    break;
+                case 'myCourseList.duration':
+                    ds = ' (列表兜底)';
+                    break;
+                case 'transcript_index_type.duration':
+                    ds = ' (类型默认)';
+                    break;
+                case 'completion_flag_text':
+                    ds = ' (规则解析)';
+                    break;
+                case 'signInList.duration':
+                    ds = ' (签到列表)';
+                    break;
+                default:
+                    ds = '';
+            }
+            console.log(`  时长: ${item.duration}${ds}`);
         });
 
         // 1. 处理第一个（最紧急）活动

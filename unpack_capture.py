@@ -8,7 +8,53 @@ import gzip
 import zlib
 import os
 
-def decompress(data):
+def dechunk(data: bytes) -> bytes:
+    """Decode HTTP chunked transfer-encoding body.
+    If parsing fails, return original data.
+    """
+    try:
+        i = 0
+        n = len(data)
+        out = bytearray()
+        while True:
+            # find chunk-size line
+            j = data.find(b"\r\n", i)
+            if j == -1:
+                break
+            line = data[i:j]
+            # strip chunk extensions
+            if b";" in line:
+                line = line.split(b";", 1)[0]
+            line = line.strip()
+            # empty line guard
+            if not line:
+                i = j + 2
+                continue
+            # parse hex size
+            try:
+                size = int(line, 16)
+            except Exception:
+                # not chunked
+                return data
+            i = j + 2
+            if size == 0:
+                # skip final CRLF and trailers if present
+                break
+            if i + size > n:
+                # malformed
+                return data
+            out += data[i:i+size]
+            i = i + size
+            # skip CRLF after chunk
+            if i + 2 <= n and data[i:i+2] == b"\r\n":
+                i += 2
+        return bytes(out) if out else data
+    except Exception:
+        return data
+
+def decompress(data: bytes) -> bytes:
+    # First, try to dechunk if needed
+    data = dechunk(data)
     # Try gzip
     try:
         return gzip.decompress(data)

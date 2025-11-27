@@ -72,82 +72,78 @@ async function checkAndSignIn() {
         }
     }
 
-    if (!autoSignAll && targetIds.length === 0) {
-        console.log("ℹ️ 未开启自动签到所有，且未填写运行时ID，跳过执行。");
-        return;
-    }
-
-    if (targetIds.length > 0) {
-        console.log(`🎯 运行时指定课程 ID: ${targetIds.join(', ')}`);
-        for (const tId of targetIds) {
-            console.log(`\n--- 处理课程 ID: ${tId} ---`);
-            const info = await getCourseInfo(tId, headers);
-            if (info) {
-                const { canSign, typeStr } = decideSignType(info);
-                // 在时间窗口内必须通知
-                if (canSign) {
-                    $.msg($.name, `处于${typeStr}时间窗口`, `课程: ${info.course_title || tId}`);
-                    await executeSign(tId, info, headers, typeStr, info.course_title || "指定课程");
-                } else {
-                    // 不在窗口，不发通知
-                    console.log(`⏳ [${tId}] 当前不在签到/签退时间范围内`);
-                    if (info.sign_in_start_time) console.log(`签到: ${info.sign_in_start_time} - ${info.sign_in_end_time}`);
-                    if (info.sign_out_start_time) console.log(`签退: ${info.sign_out_start_time} - ${info.sign_out_end_time}`);
-                }
-            }
-        }
-        return;
-    }
-
-    // 未指定ID但开启了自动签到所有
-    console.log("🔍 正在获取已报名课程列表...");
+    // 默认：始终尝试“签退所有”
+    let courses = [];
     try {
         const listData = await httpGet(CONFIG.listUrl, headers);
-        if (!listData || listData.code !== 200) {
-            console.log(`❌ 获取列表失败: ${JSON.stringify(listData)}`);
-            $.msg($.name, "获取课程列表失败", listData ? listData.msg : "未知错误");
-            return;
+        if (listData && listData.code === 200) {
+            courses = listData.data.items || [];
         }
+    } catch (e) {
+        // 获取列表失败时，仍继续处理“指定ID签到”
+    }
 
-        const courses = listData.data.items || [];
-        console.log(`📋 找到 ${courses.length} 个已报名课程`);
-        if (courses.length === 0) {
-            console.log("暂无需要签到的课程");
-            return;
-        }
-
+    // Pass A: 自动签退所有（仅在签退时间窗口内才通知；但无论是否在窗口，都记录日志）
+    if (Array.isArray(courses) && courses.length > 0) {
         for (const course of courses) {
-            console.log(`\nChecking Course: [${course.course_id}] ${course.course_title}`);
-            console.log(`Status: ${course.status_label} (${course.status})`);
-
-            // 仅处理待签到/待签退
-            if (!(course.status === 0 || course.status === 1)) {
-                console.log("非签到/签退状态，跳过");
-                continue;
-            }
-
             const info = await getCourseInfo(course.course_id, headers);
             if (!info) continue;
+            const title = course.course_title || info.course_title || String(course.course_id);
+            const soWin = isInWindow(info, 'signOut');
+            const siWin = isInWindow(info, 'signIn');
+            console.log(`[${course.course_id}] ${title} | 签退窗口: ${soWin ? '是' : '否'}${info.sign_out_start_time ? ` (${info.sign_out_start_time} - ${info.sign_out_end_time})` : ''} | 签到窗口: ${siWin ? '是' : '否'}${info.sign_in_start_time ? ` (${info.sign_in_start_time} - ${info.sign_in_end_time})` : ''}`);
+            if (soWin) {
+                $.msg($.name, `处于签退窗口`, `${title}`);
+                await executeSign(course.course_id, info, headers, '签退', title);
+            }
+        }
+    }
 
-            const { canSign, typeStr } = decideSignType(info, course.status);
-            // 处在窗口则必须通知
-            if (canSign) {
-                $.msg($.name, `处于${typeStr}时间窗口`, `课程: ${course.course_title}`);
-                await executeSign(course.course_id, info, headers, typeStr, course.course_title);
-            } else {
-                // 不在窗口，不发通知
-                if (course.status === 0 && info.sign_in_start_time) {
-                    console.log(`⏳ 当前不在签到时间范围内 (${info.sign_in_start_time} - ${info.sign_in_end_time})`);
-                } else if (course.status === 1 && info.sign_out_start_time) {
-                    console.log(`⏳ 当前不在签退时间范围内 (${info.sign_out_start_time} - ${info.sign_out_end_time})`);
+    // Pass B: 签到逻辑
+    if (autoSignAll) {
+        // 签到所有处于签到窗口的课程
+        if (Array.isArray(courses) && courses.length > 0) {
+            for (const course of courses) {
+                const info = await getCourseInfo(course.course_id, headers);
+                if (!info) continue;
+                const title = course.course_title || info.course_title || String(course.course_id);
+                const soWin = isInWindow(info, 'signOut');
+                const siWin = isInWindow(info, 'signIn');
+                console.log(`[${course.course_id}] ${title} | 签退窗口: ${soWin ? '是' : '否'}${info.sign_out_start_time ? ` (${info.sign_out_start_time} - ${info.sign_out_end_time})` : ''} | 签到窗口: ${siWin ? '是' : '否'}${info.sign_in_start_time ? ` (${info.sign_in_start_time} - ${info.sign_in_end_time})` : ''}`);
+                // 签退窗口优先，若在签退窗口则不做签到
+                if (soWin) {
+                    console.log('已处于签退窗口，跳过签到（签退流程已处理）。');
+                    continue;
+                }
+                if (siWin) {
+                    $.msg($.name, `处于签到窗口`, ` ${title}`);
+                    await executeSign(course.course_id, info, headers, '签到', title);
                 } else {
-                    console.log("⏳ 当前不在可操作时间范围");
+                    console.log('当前不在签到窗口，未执行签到。');
                 }
             }
         }
-
-    } catch (e) {
-        console.error("❌ 运行异常:", e);
+    } else if (targetIds.length > 0) {
+        // 仅对指定 ID 尝试签到
+        for (const tId of targetIds) {
+            const info = await getCourseInfo(tId, headers);
+            if (!info) continue;
+            const title = info.course_title || String(tId);
+            const soWin = isInWindow(info, 'signOut');
+            const siWin = isInWindow(info, 'signIn');
+            console.log(`[${tId}] ${title} | 签退窗口: ${soWin ? '是' : '否'}${info.sign_out_start_time ? ` (${info.sign_out_start_time} - ${info.sign_out_end_time})` : ''} | 签到窗口: ${siWin ? '是' : '否'}${info.sign_in_start_time ? ` (${info.sign_in_start_time} - ${info.sign_in_end_time})` : ''}`);
+            // 签退窗口优先，若在签退窗口则交由签退流程，不进行签到
+            if (soWin) {
+                console.log('当前处于签退窗口，按默认逻辑仅执行签退，不执行签到。');
+                continue;
+            }
+            if (siWin) {
+                $.msg($.name, `处于签到时间窗口`, `课程: ${title}`);
+                await executeSign(tId, info, headers, '签到', title);
+            } else {
+                console.log('当前不在签到窗口，未执行签到。');
+            }
+        }
     }
 }
 
@@ -234,6 +230,28 @@ async function executeSign(courseId, info, headers, typeStr, courseTitle) {
         console.log("❌ 未找到签到位置信息");
         $.msg($.name, `${typeStr}失败`, `课程: ${courseTitle}\n原因: 未找到位置信息`);
     }
+}
+
+// 判断是否处于某个时间窗口（signIn/signOut）
+function isInWindow(info, kind) {
+    const now = new Date();
+    if (kind === 'signOut') {
+        if (info.sign_out_start_time && info.sign_out_end_time) {
+            const soStart = new Date(String(info.sign_out_start_time).replace(/-/g, '/'));
+            const soEnd = new Date(String(info.sign_out_end_time).replace(/-/g, '/'));
+            return now >= soStart && now <= soEnd;
+        }
+        return false;
+    }
+    if (kind === 'signIn') {
+        if (info.sign_in_start_time && info.sign_in_end_time) {
+            const siStart = new Date(String(info.sign_in_start_time).replace(/-/g, '/'));
+            const siEnd = new Date(String(info.sign_in_end_time).replace(/-/g, '/'));
+            return now >= siStart && now <= siEnd;
+        }
+        return false;
+    }
+    return false;
 }
 
 // 生成范围内随机坐标
