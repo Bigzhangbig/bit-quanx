@@ -23,7 +23,11 @@ const CONFIG = {
     // API 接口
     listUrl: "https://qcbldekt.bit.edu.cn/api/transcript/course/signIn/list?page=1&limit=10&type=1",
     infoUrl: "https://qcbldekt.bit.edu.cn/api/transcript/checkIn/info",
-    signInUrl: "https://qcbldekt.bit.edu.cn/api/transcript/signIn"
+    signInUrl: "https://qcbldekt.bit.edu.cn/api/transcript/signIn",
+    // 新增：课程详情（含时长）REST接口
+    courseInfoUrlRest: "https://qcbldekt.bit.edu.cn/api/course/info/",
+    // 新增：我的课程列表（兜底时长来源）
+    myCourseListUrl: "https://qcbldekt.bit.edu.cn/api/course/list/my?page=1&limit=200"
 };
 
 (async () => {
@@ -89,9 +93,10 @@ async function checkAndSignIn() {
             const info = await getCourseInfo(course.course_id, headers);
             if (!info) continue;
             const title = course.course_title || info.course_title || String(course.course_id);
+            const duration = await getCourseDuration(course.course_id, headers);
             const soWin = isInWindow(info, 'signOut');
             const siWin = isInWindow(info, 'signIn');
-            console.log(`[${course.course_id}] ${title} | 签退窗口: ${soWin ? '是' : '否'}${info.sign_out_start_time ? ` (${info.sign_out_start_time} - ${info.sign_out_end_time})` : ''} | 签到窗口: ${siWin ? '是' : '否'}${info.sign_in_start_time ? ` (${info.sign_in_start_time} - ${info.sign_in_end_time})` : ''}`);
+            console.log(`[${course.course_id}] ${title} | 时长: ${duration != null ? duration : '未知'} | 签退窗口: ${soWin ? '是' : '否'}${info.sign_out_start_time ? ` (${info.sign_out_start_time} - ${info.sign_out_end_time})` : ''} | 签到窗口: ${siWin ? '是' : '否'}${info.sign_in_start_time ? ` (${info.sign_in_start_time} - ${info.sign_in_end_time})` : ''}`);
             if (soWin) {
                 $.msg($.name, `处于签退窗口`, `${title}`);
                 await executeSign(course.course_id, info, headers, '签退', title);
@@ -107,9 +112,10 @@ async function checkAndSignIn() {
                 const info = await getCourseInfo(course.course_id, headers);
                 if (!info) continue;
                 const title = course.course_title || info.course_title || String(course.course_id);
+                const duration = await getCourseDuration(course.course_id, headers);
                 const soWin = isInWindow(info, 'signOut');
                 const siWin = isInWindow(info, 'signIn');
-                console.log(`[${course.course_id}] ${title} | 签退窗口: ${soWin ? '是' : '否'}${info.sign_out_start_time ? ` (${info.sign_out_start_time} - ${info.sign_out_end_time})` : ''} | 签到窗口: ${siWin ? '是' : '否'}${info.sign_in_start_time ? ` (${info.sign_in_start_time} - ${info.sign_in_end_time})` : ''}`);
+                console.log(`[${course.course_id}] ${title} | 时长: ${duration != null ? duration : '未知'} | 签退窗口: ${soWin ? '是' : '否'}${info.sign_out_start_time ? ` (${info.sign_out_start_time} - ${info.sign_out_end_time})` : ''} | 签到窗口: ${siWin ? '是' : '否'}${info.sign_in_start_time ? ` (${info.sign_in_start_time} - ${info.sign_in_end_time})` : ''}`);
                 // 签退窗口优先，若在签退窗口则不做签到
                 if (soWin) {
                     console.log('已处于签退窗口，跳过签到（签退流程已处理）。');
@@ -129,9 +135,10 @@ async function checkAndSignIn() {
             const info = await getCourseInfo(tId, headers);
             if (!info) continue;
             const title = info.course_title || String(tId);
+            const duration = await getCourseDuration(tId, headers);
             const soWin = isInWindow(info, 'signOut');
             const siWin = isInWindow(info, 'signIn');
-            console.log(`[${tId}] ${title} | 签退窗口: ${soWin ? '是' : '否'}${info.sign_out_start_time ? ` (${info.sign_out_start_time} - ${info.sign_out_end_time})` : ''} | 签到窗口: ${siWin ? '是' : '否'}${info.sign_in_start_time ? ` (${info.sign_in_start_time} - ${info.sign_in_end_time})` : ''}`);
+            console.log(`[${tId}] ${title} | 时长: ${duration != null ? duration : '未知'} | 签退窗口: ${soWin ? '是' : '否'}${info.sign_out_start_time ? ` (${info.sign_out_start_time} - ${info.sign_out_end_time})` : ''} | 签到窗口: ${siWin ? '是' : '否'}${info.sign_in_start_time ? ` (${info.sign_in_start_time} - ${info.sign_in_end_time})` : ''}`);
             // 签退窗口优先，若在签退窗口则交由签退流程，不进行签到
             if (soWin) {
                 console.log('当前处于签退窗口，按默认逻辑仅执行签退，不执行签到。');
@@ -145,6 +152,37 @@ async function checkAndSignIn() {
             }
         }
     }
+}
+
+// 获取课程时长：优先 REST 详情，其次我的课程列表兜底
+async function getCourseDuration(courseId, headers) {
+    // 1) REST 课程详情
+    try {
+        const rest = await httpGet(`${CONFIG.courseInfoUrlRest}${courseId}`, headers);
+        if (rest && rest.code === 200 && rest.data) {
+            if (rest.data.duration != null) return rest.data.duration;
+        }
+    } catch (e) {
+        // 忽略错误，继续兜底
+    }
+    // 2) 我的课程列表兜底
+    try {
+        const list = await httpGet(CONFIG.myCourseListUrl, headers);
+        if (list && list.code === 200 && list.data && Array.isArray(list.data.items)) {
+            const found = list.data.items.find(x => String(x.course_id || x.id) === String(courseId));
+            if (found && found.duration != null) return found.duration;
+        } else {
+            // 旧接口兜底
+            const oldList = await httpGet("https://qcbldekt.bit.edu.cn/api/transcript/course/list/my?page=1&limit=200", headers);
+            if (oldList && oldList.code === 200 && oldList.data && Array.isArray(oldList.data.items)) {
+                const found2 = oldList.data.items.find(x => String(x.course_id || x.id) === String(courseId));
+                if (found2 && found2.duration != null) return found2.duration;
+            }
+        }
+    } catch (e) {
+        // 忽略错误
+    }
+    return null;
 }
 
 async function getCourseInfo(courseId, headers) {
