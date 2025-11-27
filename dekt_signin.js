@@ -96,14 +96,18 @@ async function checkAndSignIn() {
             if (!info) continue;
             const meta = await getCourseMeta(course.course_id, headers);
             const title = course.course_title || info.course_title || String(course.course_id);
-            const duration = meta ? meta.duration : null;
             const siWin = isInWindow(info, 'signIn');
             const soWin = isInWindow(info, 'signOut');
-            // 日志始终输出（先签到再签退），非 time 也输出并标注跳过
+            // 日志：非 time 类型仅提示跳过；time 类型输出时长与窗口
             console.log(`===== 课程 ${course.course_id} | ${title} =====`);
-            console.log(`时长: ${duration != null ? duration : '未知'}${meta && meta.completionType !== 'time' ? '（非time类型，跳过执行）' : ''}`);
-            console.log(`签到窗口: ${siWin ? '是' : '否'}${info.sign_in_start_time ? ` (${info.sign_in_start_time} - ${info.sign_in_end_time})` : ''}`);
-            console.log(`签退窗口: ${soWin ? '是' : '否'}${info.sign_out_start_time ? ` (${info.sign_out_start_time} - ${info.sign_out_end_time})` : ''}`);
+            if (meta && meta.completionType === 'time') {
+                const duration = meta.duration;
+                console.log(`时长: ${duration != null ? duration : '未知'}`);
+                console.log(`签到窗口: ${siWin ? '是' : '否'}${info.sign_in_start_time ? ` (${info.sign_in_start_time} - ${info.sign_in_end_time})` : ''}`);
+                console.log(`签退窗口: ${soWin ? '是' : '否'}${info.sign_out_start_time ? ` (${info.sign_out_start_time} - ${info.sign_out_end_time})` : ''}`);
+            } else {
+                console.log(`完成标识非 time，跳过该课程的时长与窗口显示`);
+            }
             console.log(`----------------------------------------------`);
             // 仅在开启 autoSignAll 且为 time 类型时执行
             if (autoSignAll && meta && meta.completionType === 'time') {
@@ -124,14 +128,18 @@ async function checkAndSignIn() {
             if (!info) continue;
             const meta = await getCourseMeta(tId, headers);
             const title = info.course_title || String(tId);
-            const duration = meta ? meta.duration : null;
             const soWin = isInWindow(info, 'signOut');
             const siWin = isInWindow(info, 'signIn');
             // 日志分割线 + 先签到后签退
             console.log(`===== 课程 ${tId} | ${title} =====`);
-            console.log(`时长: ${duration != null ? duration : '未知'}${meta && meta.completionType !== 'time' ? '（非time类型，跳过执行）' : ''}`);
-            console.log(`签到窗口: ${siWin ? '是' : '否'}${info.sign_in_start_time ? ` (${info.sign_in_start_time} - ${info.sign_in_end_time})` : ''}`);
-            console.log(`签退窗口: ${soWin ? '是' : '否'}${info.sign_out_start_time ? ` (${info.sign_out_start_time} - ${info.sign_out_end_time})` : ''}`);
+            if (meta && meta.completionType === 'time') {
+                const duration = meta.duration;
+                console.log(`时长: ${duration != null ? duration : '未知'}`);
+                console.log(`签到窗口: ${siWin ? '是' : '否'}${info.sign_in_start_time ? ` (${info.sign_in_start_time} - ${info.sign_in_end_time})` : ''}`);
+                console.log(`签退窗口: ${soWin ? '是' : '否'}${info.sign_out_start_time ? ` (${info.sign_out_start_time} - ${info.sign_out_end_time})` : ''}`);
+            } else {
+                // console.log(`完成标识非 time，跳过该课程的时长与窗口显示`);
+            }
             console.log(`----------------------------------------------`);
             if (meta && meta.completionType === 'time') {
                 if (siWin) {
