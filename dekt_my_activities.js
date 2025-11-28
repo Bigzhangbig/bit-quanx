@@ -211,18 +211,26 @@ async function processItems(items, headers) {
 
     for (const item of items) {
         // status_label: "待签到", "待签退", "进行中" 等
-        // status: 0 (待签到), 1 (待签退), 2 (补卡), 3 (已结束) 
+        // status: 0 (待签到), 1 (待签退), 2 (补卡), 3 (已结束)
         // 抓包示例: status:0 -> 待签到, status:1 -> 待签退
-        
+
+        // 去除已取消的课程（如 status_label 包含 '已取消' 或 status 为 4）
+        if (item.status_label && item.status_label.includes("已取消")) {
+            continue;
+        }
+        if (typeof item.status !== 'undefined' && (item.status === 4 || item.status === '4')) {
+            continue;
+        }
+
         const isSignIn = item.status_label && item.status_label.includes("待签到");
         const isSignOut = item.status_label && item.status_label.includes("待签退");
 
         if (isSignIn || isSignOut) {
             const endTimeStr = isSignIn ? item.sign_in_end_time : item.sign_out_end_time;
-            
+
             if (endTimeStr) {
                 const endTime = new Date(endTimeStr.replace(/-/g, '/')); // 兼容性替换
-                
+
                 // 如果当前时间在结束时间之前
                 if (now < endTime) {
                     // 获取详细信息：时间段 + 时长 + 分类
@@ -231,7 +239,7 @@ async function processItems(items, headers) {
                     const signInEnd = info ? info.sign_in_end_time : item.sign_in_end_time;
                     const signOutStart = info ? info.sign_out_start_time : item.sign_out_start_time;
                     const signOutEnd = info ? info.sign_out_end_time : item.sign_out_end_time;
-                    
+
                     // 获取分类名称：优先 transcript_index_id，其次 transcript_name（或 transcript_index.transcript_name）
                     let category = null;
                     const catId = (info && info.transcript_index_id) || item.transcript_index_id;
@@ -242,7 +250,7 @@ async function processItems(items, headers) {
                     } else if (info && info.transcript_index && info.transcript_index.transcript_name) {
                         category = CONFIG.categories.find(c => c.name === info.transcript_index.transcript_name);
                     }
-                    
+
                     const categoryName = category ? category.name : (info && info.transcript_name) || (info && info.transcript_index && info.transcript_index.transcript_name) || "未知分类";
                     // 优先 info.duration；其次从 my list/item；最后 transcript_index_type.duration 或 completion_flag_text
                     let duration = null;
