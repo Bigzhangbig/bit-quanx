@@ -93,6 +93,15 @@ async function syncFromGist() {
                             }
                         }
 
+                        // 同步 user_id 到 .env，供取消报名等脚本使用
+                        if (typeof content.user_id !== 'undefined' && content.user_id !== envData.bit_sc_user_id) {
+                            envData.bit_sc_user_id = String(content.user_id);
+                            // 兼容 dekt_user_id 键名
+                            envData.dekt_user_id = String(content.user_id);
+                            console.log("✅ User ID updated from Gist");
+                            updated = true;
+                        }
+
                         if (updated) {
                             saveEnv(envData);
                         } else {
