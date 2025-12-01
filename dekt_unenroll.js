@@ -30,8 +30,15 @@ async function main() {
     const token = getFirstPref(KEY_TOKENS);
     headers = normalizeHeaders(headers, token);
 
-    const userId = deriveUserId(token) || getFirstPref(["bit_sc_user_id", "dekt_user_id", "DEKT_USER_ID"]);
-    console.log(`[unenroll] courseId=${courseId}, userId=${userId || ""}`);
+    // 用户ID来源优先级：显式偏好 > 备用键 > 不解析 token 前缀（避免错误）
+    const explicitUserId = getFirstPref(["bit_sc_user_id", "dekt_user_id", "DEKT_USER_ID", "DEKT_FORCE_USER_ID", "user_id"]);
+    const derivedUserId = deriveUserId(token); // 可能不准确，作为低优先级候选
+    let userId = explicitUserId || "";
+    console.log(`[unenroll] courseId=${courseId}, explicitUserId=${explicitUserId || '(none)'}, derivedUserId=${derivedUserId || '(none)'}`);
+    if (!userId && derivedUserId) {
+      userId = derivedUserId; // 仅在没有显式值时使用
+    }
+    console.log(`[unenroll] final userId candidate=${userId || '(empty will try without user_id first)'}`);
     console.log(`[unenroll] headers.Authorization=${headers.Authorization ? 'Bearer *' : 'none'}`);
     const result = await tryCancel(courseId, userId, headers);
     if (result.ok) {
@@ -97,32 +104,37 @@ function normalizeHeaders(h, token) {
 }
 
 async function tryCancel(courseId, userId, headers) {
-  // 优先使用抓包中的 JSON 字段：{"course_id":451,"user_id":9028711}
+  // 1. 优先尝试仅 course_id（避免错误 user_id 导致失败）
   let last = null;
+  const candidates = [];
+  candidates.push({ course_id: toInt(courseId) });
+  // 如果提供 userId，则添加正确格式的 JSON
+  if (userId) candidates.push({ course_id: toInt(courseId), user_id: toInt(userId) });
+  // 若存在不同 userId 偏好（例如误解析），尝试不带 user_id 再带 derivedUserId 逻辑已处理
   for (const path of CANCEL_PATHS) {
-    const payload = userId ? { course_id: toInt(courseId), user_id: toInt(userId) } : { course_id: toInt(courseId) };
-    const r = await httpPost(`${HOST}${path}`, headers, JSON.stringify(payload));
-    const ok = isSuccess(r);
-    if (ok) return { ok: true, path, ...r };
-    last = { path, ...r };
+    for (const payload of candidates) {
+      console.log(`[unenroll] TRY path=${path} payload=${JSON.stringify(payload)}`);
+      const r = await httpPost(`${HOST}${path}`, headers, JSON.stringify(payload));
+      if (isSuccess(r)) return { ok: true, path, ...r };
+      last = { path, ...r };
+    }
   }
-  // 回退：兼容旧接口字段名与表单编码
+  // 2. 表单编码回退（含/不含 user_id）
   const formHeaders = Object.assign({}, headers, { "Content-Type": "application/x-www-form-urlencoded" });
   for (const path of CANCEL_PATHS) {
-    const r = await httpPost(
-      `${HOST}${path}`,
-      formHeaders,
-      `course_id=${encodeURIComponent(courseId)}&user_id=${encodeURIComponent(userId || "")}`
-    );
-    const ok = isSuccess(r);
-    if (ok) return { ok: true, path, ...r };
-    last = { path, ...r };
+    for (const payload of candidates) {
+      const body = `course_id=${encodeURIComponent(payload.course_id)}${payload.user_id ? `&user_id=${encodeURIComponent(payload.user_id)}` : ''}`;
+      console.log(`[unenroll] TRY-FORM path=${path} body=${body}`);
+      const r = await httpPost(`${HOST}${path}`, formHeaders, body);
+      if (isSuccess(r)) return { ok: true, path, ...r };
+      last = { path, ...r };
+    }
   }
-  // 再回退到旧字段名 courseId
+  // 3. 旧字段名 courseId
   for (const path of CANCEL_PATHS) {
+    console.log(`[unenroll] TRY-LEGACY path=${path} body={courseId:${courseId}}`);
     const r = await httpPost(`${HOST}${path}`, headers, JSON.stringify({ courseId }));
-    const ok = isSuccess(r);
-    if (ok) return { ok: true, path, ...r };
+    if (isSuccess(r)) return { ok: true, path, ...r };
     last = { path, ...r };
   }
   return { ok: false, ...(last || {}) };
@@ -163,10 +175,12 @@ function done(reason) {
 }
 
 function deriveUserId(token) {
-  // 从 Bearer token 形如 "9028711|xxxxx" 中提取 user_id（抓包示例）
+  // 原逻辑：从 token 前缀解析；但抓包示例显示 token 前缀可能不是 user_id。
+  // 保留此函数，仅作为低优先级候选，不再强制使用。
   if (!token) return "";
   const part = String(token).split("|")[0];
-  return /^(\d+)$/.test(part) ? part : "";
+  if (/^(\d+)$/.test(part)) return part;
+  return "";
 }
 
 function toInt(v) {
