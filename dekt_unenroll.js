@@ -4,6 +4,8 @@
 // - 若后端取消报名路径不同，请调整 CANCEL_PATHS
 
 const HOST = "https://qcbldekt.bit.edu.cn";
+const $ = new Env("第二课堂取消报名");
+console.log("[unenroll] 脚本启动");
 const KEY_COURSE_IDS = ["bit_sc_signup_course_id", "dekt_signup_course_id", "dekt_course_id", "DEKT_COURSE_ID"];
 const KEY_HEADERS = ["bit_sc_headers", "dekt_headers", "DEKT_HEADERS"];
 const KEY_TOKENS = ["bit_sc_token", "dekt_token", "DEKT_TOKEN"];
@@ -29,9 +31,12 @@ async function main() {
     headers = normalizeHeaders(headers, token);
 
     const userId = deriveUserId(token) || getFirstPref(["bit_sc_user_id", "dekt_user_id", "DEKT_USER_ID"]);
+    console.log(`[unenroll] courseId=${courseId}, userId=${userId || ""}`);
+    console.log(`[unenroll] headers.Authorization=${headers.Authorization ? 'Bearer *' : 'none'}`);
     const result = await tryCancel(courseId, userId, headers);
     if (result.ok) {
       notify("第二课堂取消报名", `课程ID: ${courseId}`, `已取消报名（${result.path}）`);
+      console.log(`[unenroll] 成功: path=${result.path} status=${result.status}`);
       return done();
     } else {
       const parsed = tryParseJSON(result.body) || {};
@@ -39,17 +44,19 @@ async function main() {
       const hint = (result.status === 401 || result.code === 401) ? "(Token 失效，请重新获取)" : "";
       const msg = `取消失败：HTTP ${result.status || "未知"} ${detail} ${hint} [${result.path || "未知接口"}]`;
       notify("第二课堂取消报名", `课程ID: ${courseId}`, msg);
+      console.log(`[unenroll] 失败: ${msg}`);
       return done(msg);
     }
   } catch (e) {
     notify("第二课堂取消报名", "", `异常：${String(e)}`);
+    console.log(`[unenroll] 异常: ${String(e)}`);
     return done(String(e));
   }
 }
 
 function getFirstPref(keys) {
   for (const k of keys) {
-    const v = $prefs?.valueForKey?.(k);
+    const v = $.getdata(k);
     if (v) return v.trim();
   }
   return "";
@@ -128,19 +135,23 @@ function isSuccess(resp) {
 
 function httpPost(url, headers, body) {
   return new Promise((resolve) => {
-    $task.fetch({ url, method: "POST", headers, body }).then(
-      (resp) => resolve({ status: resp.statusCode, headers: resp.headers, body: resp.body }),
-      (err) => resolve({ err })
-    );
+    $.post({ url, headers, body }, (err, resp, data) => {
+      if (err) {
+        resolve({ err });
+        return;
+      }
+      const status = resp && (resp.statusCode ?? resp.status);
+      resolve({ status, headers: resp?.headers, body: data });
+    });
   });
 }
 
 function notify(title, sub, body) {
-  $notify(title, sub, body);
+  $.msg(title, sub, body);
 }
 
 function done(reason) {
-  $done({ ret: reason ? false : true, msg: reason || "OK" });
+  $.done({ ret: reason ? false : true, msg: reason || "OK" });
 }
 
 function deriveUserId(token) {
@@ -154,3 +165,6 @@ function toInt(v) {
   const n = parseInt(String(v), 10);
   return Number.isFinite(n) ? n : undefined;
 }
+
+// Env Polyfill（与 activities 保持一致，支持 QuanX）
+function Env(t, e) { class s { constructor(t) { this.env = t } } return new class { constructor(t) { this.name = t, this.logs = [], this.isSurge = !1, this.isQuanX = "undefined" != typeof $task, this.isLoon = !1 } getdata(t) { let e = this.getval(t); if (/^@/.test(t)) { const [, s, i] = /^@(.*?)\.(.*?)$/.exec(t), r = s ? this.getval(s) : ""; if (r) try { const t = JSON.parse(r); e = t ? this.getval(i, t) : null } catch (t) { e = "" } } return e } setdata(t, e) { let s = !1; if (/^@/.test(e)) { const [, i, r] = /^@(.*?)\.(.*?)$/.exec(e), o = this.getval(i), h = i ? "null" === o ? null : o || "{}" : "{}"; try { const e = JSON.parse(h); this.setval(r, t, e), s = !0, this.setval(i, JSON.stringify(e)) } catch (e) { const o = {}; this.setval(r, t, o), s = !0, this.setval(i, JSON.stringify(o)) } } else s = this.setval(t, e); return s } getval(t) { return this.isQuanX ? $prefs.valueForKey(t) : "" } setval(t, e) { return this.isQuanX ? $prefs.setValueForKey(t, e) : "" } msg(e = t, s = "", i = "", r) { this.isQuanX && $notify(e, s, i, r) } get(t, e = (() => { })) { this.isQuanX && ("string" == typeof t && (t = { url: t }), t.method = "GET", $task.fetch(t).then(t => { e(null, t, t.body) }, t => e(t.error, null, null))) } post(t, e = (() => { })) { this.isQuanX && ("string" == typeof t && (t = { url: t }), t.method = "POST", $task.fetch(t).then(t => { e(null, t, t.body) }, t => e(t.error, null, null))) } done(t = {}) { this.isQuanX && $done(t) } }(t, e) }
