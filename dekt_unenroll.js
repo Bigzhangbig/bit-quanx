@@ -10,14 +10,8 @@ const KEY_COURSE_IDS = ["bit_sc_signup_course_id", "dekt_signup_course_id", "dek
 const KEY_HEADERS = ["bit_sc_headers", "dekt_headers", "DEKT_HEADERS"];
 const KEY_TOKENS = ["bit_sc_token", "dekt_token", "DEKT_TOKEN"];
 
-// 取消报名接口路径（根据 20251201 抓包确认）
-const CANCEL_PATHS = [
-  "/api/course/cancelApply",
-  "/api/course/cancelEnroll",
-  "/api/course/cancel",
-  "/api/app/course/cancel",
-  "/api/course/unEnroll"
-];
+// 取消报名接口路径（仅使用抓包确认的 API）
+const CANCEL_PATH = "/api/course/cancelApply";
 
 main();
 
@@ -40,6 +34,13 @@ async function main() {
     }
     console.log(`[unenroll] final userId candidate=${userId || '(empty will try without user_id first)'}`);
     console.log(`[unenroll] headers.Authorization=${headers.Authorization ? 'Bearer *' : 'none'}`);
+    // 严格按照抓包，要求提供 user_id
+    if (!userId) {
+      const err = "缺少 user_id，请在 BoxJS 设置 dekt_user_id/bit_sc_user_id（或 DEKT_FORCE_USER_ID）";
+      notify("第二课堂取消报名", `课程ID: ${courseId}`, err);
+      console.log(`[unenroll] 终止：${err}`);
+      return done(err);
+    }
     const result = await tryCancel(courseId, userId, headers);
     if (result.ok) {
       notify("第二课堂取消报名", `课程ID: ${courseId}`, `已取消报名（${result.path}）`);
@@ -86,10 +87,11 @@ function normalizeHeaders(h, token) {
   const headers = Object.assign({}, h || {});
   // 标准头
   headers["Accept"] = headers["Accept"] || "application/json, text/plain, */*";
-  headers["Content-Type"] = "application/json;charset=UTF-8";
+  headers["Content-Type"] = "application/json;charset=utf-8";
   headers["Origin"] = headers["Origin"] || HOST;
-  headers["Referer"] = headers["Referer"] || HOST + "/";
-  headers["User-Agent"] = headers["User-Agent"] || "QuantumultX/1.0";
+  headers["Referer"] = headers["Referer"] || "https://servicewechat.com/wx89b19258915c9585/25/page-frame.html";
+  headers["User-Agent"] = headers["User-Agent"] || "Mozilla/5.0 (iPad; CPU OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.65(0x18004130) NetType/WIFI Language/zh_CN";
+  headers["Host"] = headers["Host"] || "qcbldekt.bit.edu.cn";
   // 注入 token（若 headers 中未包含）
   if (token) {
     const hasAuth =
@@ -104,40 +106,11 @@ function normalizeHeaders(h, token) {
 }
 
 async function tryCancel(courseId, userId, headers) {
-  // 1. 优先尝试仅 course_id（避免错误 user_id 导致失败）
-  let last = null;
-  const candidates = [];
-  candidates.push({ course_id: toInt(courseId) });
-  // 如果提供 userId，则添加正确格式的 JSON
-  if (userId) candidates.push({ course_id: toInt(courseId), user_id: toInt(userId) });
-  // 若存在不同 userId 偏好（例如误解析），尝试不带 user_id 再带 derivedUserId 逻辑已处理
-  for (const path of CANCEL_PATHS) {
-    for (const payload of candidates) {
-      console.log(`[unenroll] TRY path=${path} payload=${JSON.stringify(payload)}`);
-      const r = await httpPost(`${HOST}${path}`, headers, JSON.stringify(payload));
-      if (isSuccess(r)) return { ok: true, path, ...r };
-      last = { path, ...r };
-    }
-  }
-  // 2. 表单编码回退（含/不含 user_id）
-  const formHeaders = Object.assign({}, headers, { "Content-Type": "application/x-www-form-urlencoded" });
-  for (const path of CANCEL_PATHS) {
-    for (const payload of candidates) {
-      const body = `course_id=${encodeURIComponent(payload.course_id)}${payload.user_id ? `&user_id=${encodeURIComponent(payload.user_id)}` : ''}`;
-      console.log(`[unenroll] TRY-FORM path=${path} body=${body}`);
-      const r = await httpPost(`${HOST}${path}`, formHeaders, body);
-      if (isSuccess(r)) return { ok: true, path, ...r };
-      last = { path, ...r };
-    }
-  }
-  // 3. 旧字段名 courseId
-  for (const path of CANCEL_PATHS) {
-    console.log(`[unenroll] TRY-LEGACY path=${path} body={courseId:${courseId}}`);
-    const r = await httpPost(`${HOST}${path}`, headers, JSON.stringify({ courseId }));
-    if (isSuccess(r)) return { ok: true, path, ...r };
-    last = { path, ...r };
-  }
-  return { ok: false, ...(last || {}) };
+  const payload = { course_id: toInt(courseId), user_id: toInt(userId) };
+  console.log(`[unenroll] POST ${CANCEL_PATH} payload=${JSON.stringify(payload)}`);
+  const r = await httpPost(`${HOST}${CANCEL_PATH}`, headers, JSON.stringify(payload));
+  if (isSuccess(r)) return { ok: true, path: CANCEL_PATH, ...r };
+  return { ok: false, path: CANCEL_PATH, ...r };
 }
 
 function isSuccess(resp) {
