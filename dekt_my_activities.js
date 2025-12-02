@@ -65,6 +65,13 @@ async function checkActivities() {
     };
 
     try {
+        // 先拉取一次“我的课程列表”，以确保详细日志能稳定打印（函数内带缓存）
+        try {
+            await getMyCourseList(headers);
+        } catch (e) {
+            console.log("预拉取我的课程列表用于日志打印失败: " + e);
+        }
+
         const res = await httpGet(CONFIG.listUrl, headers);
         if (res.code === 200 && res.data && res.data.items) {
             await processItems(res.data.items, headers);
