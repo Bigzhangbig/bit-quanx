@@ -83,6 +83,9 @@ async function getCourseList(headers) {
 // ====== 处理课程列表 ======
 async function handleCourseList(courses, headers, autoSignAll) {
     for (const course of courses) {
+        // 参考 my_activities：过滤已取消课程
+        if (course.status_label && course.status_label.includes("已取消")) continue;
+        if (typeof course.status !== 'undefined' && (course.status === 4 || course.status === '4')) continue;
         const info = await getCourseInfo(course.course_id, headers);
         if (!info) continue;
         const meta = await getCourseMeta(course.course_id, headers);
@@ -101,6 +104,9 @@ async function handleTargetIds(targetIds, headers) {
     for (const tId of targetIds) {
         const info = await getCourseInfo(tId, headers);
         if (!info) continue;
+        // 若接口返回中包含状态，也参考 activities 逻辑过滤取消状态
+        if (info.status_label && info.status_label.includes("已取消")) continue;
+        if (typeof info.status !== 'undefined' && (info.status === 4 || info.status === '4')) continue;
         const meta = await getCourseMeta(tId, headers);
         if (meta && meta.completionType === 'time') {
             showCourseLog(tId, info.course_title || String(tId), info, meta);
