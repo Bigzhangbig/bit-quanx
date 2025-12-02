@@ -50,7 +50,11 @@ async function getCookie() {
 
         if (jsessionid && openid) {
             // 1. 获取 Gist 上的数据进行对比
-            const gistData = await getGist();
+            const gistResult = await getGist();
+            const gistData = gistResult && gistResult.ok ? gistResult.data : null;
+            if (gistResult && gistResult.failed) {
+                $.msg($.name, "获取 Gist 失败", gistResult.message || "无法获取远端数据，请检查配置或网络");
+            }
             
             let needUpdate = true;
             if (gistData) {
@@ -73,7 +77,7 @@ async function getCookie() {
                     // 更新本地缓存 (可选)
                     $.setdata(jsessionid, "bit_card_jsessionid");
                     $.setdata(openid, "bit_card_openid");
-                    $.msg($.name, "凭证更新成功", "已同步到 GitHub Gist");
+                    // 正常成功不同步通知
                 } else {
                     $.msg($.name, "凭证更新失败", "同步到 Gist 失败，请查看日志");
                 }
@@ -87,7 +91,7 @@ async function getGist() {
     const gistId = $.getdata(CONFIG.gistIdKey);
     const filename = $.getdata(CONFIG.gistFileNameKey) || CONFIG.defaultFileName;
 
-    if (!githubToken || !gistId) return null;
+    if (!githubToken || !gistId) return { ok: false, failed: true, message: "配置缺失：未设置 GitHub Token 或 Gist ID" };
 
     const request = {
         url: `https://api.github.com/gists/${gistId}`,
@@ -107,26 +111,27 @@ async function getGist() {
                         try {
                             const body = JSON.parse(response.body);
                             if (body.files && body.files[filename]) {
-                                resolve(JSON.parse(body.files[filename].content));
+                                resolve({ ok: true, data: JSON.parse(body.files[filename].content) });
                             } else {
-                                resolve(null);
+                                // 文件不存在被视为“空”，不是失败
+                                resolve({ ok: true, data: null });
                             }
                         } catch (e) {
                             console.log(`[${$.name}] 解析 Gist 失败: ${e}`);
-                            resolve(null);
+                            resolve({ ok: false, failed: true, message: `解析 Gist 失败: ${e}` });
                         }
                     } else {
                         console.log(`[${$.name}] 获取 Gist 失败: ${response.statusCode}`);
-                        resolve(null);
+                        resolve({ ok: false, failed: true, message: `获取 Gist 失败: ${response.statusCode}` });
                     }
                 },
                 reason => {
                     console.log(`[${$.name}] 获取 Gist 出错: ${reason.error}`);
-                    resolve(null);
+                    resolve({ ok: false, failed: true, message: `获取 Gist 出错: ${reason.error}` });
                 }
             );
         } else {
-            resolve(null);
+            resolve({ ok: false, failed: true, message: "当前环境不支持网络请求" });
         }
     });
 }

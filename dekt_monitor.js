@@ -119,6 +119,8 @@ async function checkCourses() {
     // 统计数据
     let totalFetchedCount = 0;
     let unstartedCount = 0;
+    // Debug 模式下收集所有解析到的课程，便于最后统一打印
+    const debugCourses = [];
 
     // 遍历所有栏目
     for (let cat of CONFIG.categories) {
@@ -158,6 +160,15 @@ async function checkCourses() {
                         // 打印新获取到的数据摘要
                         const itemsSummary = courses.map(c => ({id: c.id, title: c.title}));
                         console.log(`[Debug] ${cat.name}(${status}) 解析到 ${courses.length} 条数据: ${JSON.stringify(itemsSummary)}`);
+                        // 记录到全局调试列表
+                        for (const c of courses) {
+                            debugCourses.push({
+                                id: c.id,
+                                title: (c.title || c.transcript_name || "未知名称") + "",
+                                category: cat.name,
+                                status
+                            });
+                        }
                     }
 
                     // 遍历返回的课程
@@ -342,6 +353,26 @@ async function checkCourses() {
         $.msg("⚠️ Token 已失效", "", "请重新进入小程序刷新列表获取新的 Token", { "open-url": openUrl });
         $done();
         return;
+    }
+
+    // Debug 模式：在脚本结束前打印所有解析到的课程（ID + 标题前15字）
+    if (isDebug) {
+        try {
+            console.log("[Debug] ================== 本次解析课程汇总 ==================");
+            if (debugCourses.length === 0) {
+                console.log("[Debug] 本次未解析到任何课程数据");
+            } else {
+                for (const item of debugCourses) {
+                    const shortTitle = (item.title || "").toString().slice(0, 15);
+                    const statusStr = CONFIG.statusMap[item.status] || item.status;
+                    console.log(`[Debug][${item.category}][${statusStr}] ID=${item.id} 标题="${shortTitle}${item.title.length > 15 ? '...' : ''}"`);
+                }
+                console.log(`[Debug] 共解析课程数: ${debugCourses.length}`);
+            }
+            console.log("[Debug] ==================================================");
+        } catch (e) {
+            console.log(`[Debug] 打印课程汇总时出错: ${e}`);
+        }
     }
 
     // 如果有更新，发送通知并保存新缓存

@@ -53,8 +53,11 @@ async function getCookie() {
             
             if (oldToken !== auth) {
                 // 检查 Gist 上的 Token
-                const gistData = await getGist();
-                const gistToken = gistData ? gistData.token : null;
+                const gistResult = await getGist();
+                const gistToken = gistResult && gistResult.ok && gistResult.data ? gistResult.data.token : null;
+                if (gistResult && gistResult.failed) {
+                    $.msg($.name, "获取 Gist 失败", gistResult.message || "无法获取远端数据，请检查配置或网络");
+                }
 
                 const headersToSave = JSON.stringify({
                     'User-Agent': $request.headers['User-Agent'] || $request.headers['user-agent'],
@@ -77,10 +80,11 @@ async function getCookie() {
                     if (parsedUserId) $.setdata(parsedUserId, CONFIG.userIdKey);
                     
                     // 同步到 Gist
-                    await updateGist(auth, headersToSave, parsedUserId);
-
-                    $.msg($.name, "获取Token成功", "Token已更新，请去运行监控脚本测试", { 'isSilent': true });
-                    console.log(`[${$.name}] Token 更新成功`);
+                    const gistOk = await updateGist(auth, headersToSave, parsedUserId);
+                    if (!gistOk) {
+                        $.msg($.name, "Gist 同步失败", "Token 未能同步到 GitHub Gist，请查看日志");
+                    }
+                    console.log(`[${$.name}] Token 已更新`);
                 }
             } else {
                 if (isDebug) console.log(`[${$.name}] Token 未变化，跳过通知`);
@@ -97,7 +101,7 @@ async function getGist() {
     const filename = $.getdata(CONFIG.gistFileNameKey) || "bit_cookies.json";
 
     if (!githubToken || !gistId) {
-        return null;
+        return { ok: false, failed: true, message: "配置缺失：未设置 GitHub Token 或 Gist ID" };
     }
 
     const url = `https://api.github.com/gists/${gistId}`;
@@ -123,25 +127,25 @@ async function getGist() {
                             const body = JSON.parse(response.body);
                             if (body.files && body.files[filename]) {
                                 const content = JSON.parse(body.files[filename].content);
-                                resolve(content);
+                                resolve({ ok: true, data: content });
                             } else {
-                                resolve(null);
+                                resolve({ ok: true, data: null });
                             }
                         } catch (e) {
                             console.log(`[${$.name}] 解析Gist失败: ${e}`);
-                            resolve(null);
+                            resolve({ ok: false, failed: true, message: `解析 Gist 失败: ${e}` });
                         }
                     } else {
-                        resolve(null);
+                        resolve({ ok: false, failed: true, message: `获取 Gist 失败: ${response.statusCode}` });
                     }
                 },
                 reason => {
                     console.log(`[${$.name}] 获取Gist失败: ${reason.error}`);
-                    resolve(null);
+                    resolve({ ok: false, failed: true, message: `获取 Gist 出错: ${reason.error}` });
                 }
             );
         } else {
-            resolve(null);
+            resolve({ ok: false, failed: true, message: "当前环境不支持网络请求" });
         }
     });
 }
@@ -153,7 +157,8 @@ async function updateGist(token, headers, userId) {
 
     if (!githubToken || !gistId) {
         console.log(`[${$.name}] 未配置 GitHub Token 或 Gist ID，跳过 Gist 同步`);
-        return;
+        $.msg($.name, "配置缺失", "请在 BoxJS 中配置 GitHub Token 和 Gist ID");
+        return false;
     }
 
     // 读取BoxJS相关配置项
@@ -205,21 +210,21 @@ async function updateGist(token, headers, userId) {
                 response => {
                     console.log(`[${$.name}] Gist同步响应: ${response.statusCode}`);
                     if (response.statusCode >= 200 && response.statusCode < 300) {
-                        console.log(`[${$.name}] Gist同步成功`);
-                        $.msg($.name, "Gist同步成功", "Token已同步到GitHub Gist");
+                        console.log(`[${$.name}] Gist 同步成功`);
+                        resolve(true);
                     } else {
-                        console.log(`[${$.name}] Gist同步失败: ${response.body}`);
+                        console.log(`[${$.name}] Gist 同步失败: ${response.body}`);
+                        resolve(false);
                     }
-                    resolve();
                 },
                 reason => {
                     console.log(`[${$.name}] Gist同步出错: ${reason.error}`);
-                    resolve();
+                    resolve(false);
                 }
             );
         } else {
             console.log(`[${$.name}] 非QuanX环境，暂不支持Gist同步`);
-            resolve();
+            resolve(false);
         }
     });
 }
