@@ -33,11 +33,28 @@ async function main() {
             $.msg($.name, "❌ 未找到 Token", "请先运行获取 Cookie 脚本或在 BoxJS 中填写");
             return;
         }
+
         const courses = await getCourseList(headers);
+        const processedIds = new Set();
+
         if (Array.isArray(courses) && courses.length > 0) {
             await handleCourseList(courses, headers, autoSignAll);
-        } else if (targetIds.length > 0) {
-            await handleTargetIds(targetIds, headers);
+            try {
+                for (const c of courses) {
+                    if (c && (c.course_id != null)) processedIds.add(String(c.course_id));
+                }
+            } catch {}
+        }
+
+        // 对于通过 BoxJS/CLI 指定的目标课程：
+        // - 当 autoSignAll=false 时，无论是否在列表中都要单独处理（确保会尝试签到/签退）
+        // - 当 autoSignAll=true 时，若已通过列表处理过则跳过以避免重复
+        const pendingTargetIds = (targetIds || [])
+            .map(id => String(id))
+            .filter(id => id && (!autoSignAll || !processedIds.has(id)));
+
+        if (pendingTargetIds.length > 0) {
+            await handleTargetIds(pendingTargetIds, headers);
         }
     } catch (e) {
         console.log(`❌ 脚本运行异常: ${e}`);
@@ -90,10 +107,11 @@ async function handleCourseList(courses, headers, autoSignAll) {
         if (!info) continue;
         const meta = await getCourseMeta(course.course_id, headers);
         if (meta && meta.completionType === 'time') {
-            showCourseLog(course.course_id, course.course_title || info.course_title || String(course.course_id), info, meta);
+            const safeTitle = course.course_title || info.course_title || String(course.course_id);
+            showCourseLog(course.course_id, safeTitle, info, meta);
             if (autoSignAll) {
-                await trySign(course.course_id, info, headers, '签到', course.course_title);
-                await trySign(course.course_id, info, headers, '签退', course.course_title);
+                await trySign(course.course_id, info, headers, '签到', safeTitle);
+                await trySign(course.course_id, info, headers, '签退', safeTitle);
             }
         }
     }
@@ -101,6 +119,7 @@ async function handleCourseList(courses, headers, autoSignAll) {
 
 // ====== 处理指定ID ======
 async function handleTargetIds(targetIds, headers) {
+    const skipDelay = Array.isArray(targetIds) && targetIds.length === 1;
     for (const tId of targetIds) {
         const info = await getCourseInfo(tId, headers);
         if (!info) continue;
@@ -109,9 +128,10 @@ async function handleTargetIds(targetIds, headers) {
         if (typeof info.status !== 'undefined' && (info.status === 4 || info.status === '4')) continue;
         const meta = await getCourseMeta(tId, headers);
         if (meta && meta.completionType === 'time') {
-            showCourseLog(tId, info.course_title || String(tId), info, meta);
-            await trySign(tId, info, headers, '签到', info.course_title);
-            await trySign(tId, info, headers, '签退', info.course_title);
+            const safeTitle = await resolveCourseTitle(tId, info, headers);
+            showCourseLog(tId, safeTitle, info, meta);
+            await trySign(tId, info, headers, '签到', safeTitle, { skipDelay });
+            await trySign(tId, info, headers, '签退', safeTitle, { skipDelay });
         }
     }
 }
@@ -128,19 +148,19 @@ function showCourseLog(courseId, title, info, meta) {
 }
 
 // ====== 签到/签退尝试 ======
-async function trySign(courseId, info, headers, typeStr, courseTitle) {
+async function trySign(courseId, info, headers, typeStr, courseTitle, options = {}) {
     const inSignIn = isInWindow(info, 'signIn');
     const inSignOut = isInWindow(info, 'signOut');
     if (inSignIn && inSignOut) {
         // 同时处于签到和签退窗口，优先签到
         $.msg($.name, `处于签到和签退窗口，默认签到`, `${courseTitle}`);
-        await executeSign(courseId, info, headers, '签到', courseTitle);
+        await executeSign(courseId, info, headers, '签到', courseTitle, options);
     } else if (typeStr === '签到' && inSignIn) {
         $.msg($.name, `处于签到窗口`, `${courseTitle}`);
-        await executeSign(courseId, info, headers, '签到', courseTitle);
+        await executeSign(courseId, info, headers, '签到', courseTitle, options);
     } else if (typeStr === '签退' && inSignOut) {
         $.msg($.name, `处于签退窗口`, `${courseTitle}`);
-        await executeSign(courseId, info, headers, '签退', courseTitle);
+        await executeSign(courseId, info, headers, '签退', courseTitle, options);
     }
 }
 // ...existing code...
@@ -226,11 +246,12 @@ async function checkAndSignIn() {
         }
     } else if (targetIds.length > 0) {
         // 仅对指定 ID 尝试签到
+        const skipDelay = targetIds.length === 1;
         for (const tId of targetIds) {
             const info = await getCourseInfo(tId, headers);
             if (!info) continue;
             const meta = await getCourseMeta(tId, headers);
-            const title = info.course_title || String(tId);
+            const title = await resolveCourseTitle(tId, info, headers);
             const soWin = isInWindow(info, 'signOut');
             const siWin = isInWindow(info, 'signIn');
                 // 只显示 time 类型课程
@@ -243,11 +264,11 @@ async function checkAndSignIn() {
                     console.log(`----------------------------------------------`);
                     if (siWin) {
                         $.msg($.name, `处于签到时间窗口`, `课程: ${title}`);
-                        await executeSign(tId, info, headers, '签到', title);
+                        await executeSign(tId, info, headers, '签到', title, { skipDelay });
                     }
                     if (soWin) {
                         $.msg($.name, `处于签退时间窗口`, `课程: ${title}`);
-                        await executeSign(tId, info, headers, '签退', title);
+                        await executeSign(tId, info, headers, '签退', title, { skipDelay });
                     }
                 }
         }
@@ -328,6 +349,33 @@ async function getCourseInfo(courseId, headers) {
             return { duration: null, completionType: 'other' };
     }
 
+// 解析课程标题：优先 info，其次 REST，最后我的课程列表
+async function resolveCourseTitle(courseId, info, headers) {
+    if (info) {
+        const t = info.course_title || info.title || info.name || info.course_name;
+        if (t) return t;
+    }
+    try {
+        const rest = await httpGet(`${CONFIG.courseInfoUrlRest}${courseId}`, headers);
+        if (rest && rest.code === 200 && rest.data) {
+            const d = rest.data;
+            const t2 = d.course_title || d.title || d.name || d.course_name;
+            if (t2) return t2;
+        }
+    } catch {}
+    try {
+        const list = await httpGet(CONFIG.myCourseListUrl, headers);
+        if (list && list.code === 200 && list.data && Array.isArray(list.data.items)) {
+            const found = list.data.items.find(x => String(x.course_id || x.id) === String(courseId));
+            if (found) {
+                const t3 = found.course_title || found.title || found.name || found.course_name;
+                if (t3) return t3;
+            }
+        }
+    } catch {}
+    return String(courseId);
+}
+
 
 async function doSignIn(courseId, lat, lon, address, headers, typeStr, courseTitle) {
     const body = {
@@ -370,7 +418,8 @@ async function doSignIn(courseId, lat, lon, address, headers, typeStr, courseTit
     }
 }
 
-async function executeSign(courseId, info, headers, typeStr, courseTitle) {
+async function executeSign(courseId, info, headers, typeStr, courseTitle, options = {}) {
+    const skipDelay = !!(options && options.skipDelay);
     console.log(`🚀 开始执行${typeStr}...`);
     // 获取位置信息
     if (info.sign_in_address && info.sign_in_address.length > 0) {
@@ -388,10 +437,12 @@ async function executeSign(courseId, info, headers, typeStr, courseTitle) {
         // 执行签到
         await doSignIn(courseId, lat, lon, address, headers, typeStr, courseTitle);
 
-        // 增加随机延时，避免并发过快
-        const delay = Math.floor(Math.random() * 15000) + 15000; // 15-30秒
-        console.log(`⏳ 等待 ${(delay / 1000).toFixed(1)} 秒...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        // 增加随机延时，避免并发过快（单 ID 时跳过等待）
+        if (!skipDelay) {
+            const delay = Math.floor(Math.random() * 15000) + 15000; // 15-30秒
+            console.log(`⏳ 等待 ${(delay / 1000).toFixed(1)} 秒...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
     } else {
         console.log("❌ 未找到签到位置信息");
         $.msg($.name, `${typeStr}失败`, `课程: ${courseTitle}\n原因: 未找到位置信息`);
