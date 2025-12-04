@@ -1,3 +1,34 @@
+"""
+脚本名称：抓包数据解包工具
+作者：Gemini for User
+描述：解压抓包工具（如 Proxyman/Charles）导出的请求/响应数据文件。
+      支持 chunked 编码解析和 gzip/deflate/br 解压缩。
+
+用法：
+1. 单文件解包：
+     python unpack_capture.py <root_dir>
+
+2. 搜索指定域名的抓包并解包：
+     python unpack_capture.py <root_dir> <keyword>
+   示例：
+     python unpack_capture.py 20251201_160758 qcbldekt.bit.edu.cn
+
+3. 搜索指定域名和路径的抓包：
+     python unpack_capture.py <root_dir> <keyword> <path_contains>
+   示例：
+     python unpack_capture.py 20251201_160758 qcbldekt.bit.edu.cn /api/course/cancelApply
+
+参数说明：
+- root_dir：抓包导出的根目录
+- keyword：要搜索的域名或关键字（默认 qcbldekt.bit.edu.cn）
+- path_contains：可选，过滤包含指定路径的请求
+
+输出：
+- 若响应为 JSON，保存为 .decoded.json
+- 若响应为普通文本，保存为 .decoded.txt
+- 若响应为二进制，保存为 .decoded.bin
+"""
+
 import sys
 import gzip
 import zlib

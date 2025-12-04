@@ -1,7 +1,25 @@
-// 第二课堂 取消报名（手动）
-// - 复用 BoxJS 的“报名课程ID”与认证信息
-// - 仅手动运行（task.enabled=false）
-// - 若后端取消报名路径不同，请调整 CANCEL_PATHS
+/*
+ * 脚本名称：北理工第二课堂-取消报名
+ * 作者：Gemini for User
+ * 描述：取消已报名的第二课堂课程。复用 BoxJS 的"报名课程ID"与认证信息。
+ * 
+ * 注意事项：
+ * - 仅手动运行（task.enabled=false）
+ * - 若后端取消报名路径不同，请调整 CANCEL_PATH
+ * 
+ * BoxJS 配置项：
+ * - bit_sc_signup_course_id / dekt_course_id / DEKT_COURSE_ID：课程ID
+ * - bit_sc_user_id / dekt_user_id / DEKT_USER_ID：用户ID
+ * - bit_sc_token / dekt_token：认证Token
+ * - bit_sc_headers / dekt_headers：请求Headers（可选）
+ * 
+ * [task_local]
+ * # 取消报名 (手动运行)
+ * 0 0 1 1 * https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/dekt_unenroll.js, tag=第二课堂取消报名, enabled=false
+ * 
+ * [mitm]
+ * hostname = qcbldekt.bit.edu.cn
+ */
 
 const HOST = "https://qcbldekt.bit.edu.cn";
 const $ = new Env("第二课堂取消报名");
