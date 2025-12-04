@@ -1,7 +1,21 @@
 /*
- * 审计脚本：统计第二课堂课程时长字段来源可靠性
- * 用法：node audit_duration.js
- * 读取 .env 中 bit_sc_token 使用与主脚本一致的头部。
+ * 脚本名称：第二课堂时长字段审计工具
+ * 作者：Gemini for User
+ * 描述：本地 Node.js 脚本，用于统计第二课堂课程时长字段的来源可靠性。
+ *       帮助开发者判断是否需要保留各种时长获取的兜底逻辑。
+ * 
+ * 用法：
+ * 1. 在项目根目录创建 .env 文件，写入：
+ *      bit_sc_token=你的BearerToken
+ * 2. 运行：
+ *      node audit_duration.js
+ * 
+ * 输出内容：
+ * - 列表顶层有/缺失 duration 的课程数量
+ * - transcript_index_type.duration 可用数量
+ * - completion_flag_text 可解析分钟数的课程数量
+ * - REST 详情缺失 duration 的课程数量
+ * - 开发建议（是否可删除兜底逻辑）
  */
 const fs = require('fs');
 const https = require('https');

@@ -23,16 +23,25 @@
 
 *   **`dekt_monitor.js` (监控与报名)**
     *   **功能**: 定时监控第二课堂的新活动。
-    *   **特性**: 支持按学院/年级筛选、捡漏模式、指定 ID 报名。
+    *   **特性**: 支持按学院/年级筛选、捡漏模式、指定 ID 报名、自动报名栏目过滤。
 
 *   **`dekt_my_activities.js` (我的活动)**
-    *   **功能**: 定时检查“我的活动”列表，在签到/签退时间内发送通知并提供二维码链接。
+    *   **功能**: 定时检查"我的活动"列表，在签到/签退时间内发送通知并提供二维码链接。
 
-*   **`dekt_signup.js` (手动报名)**
-    *   **功能**: 单次运行脚本，对指定的课程 ID 进行报名。
+*   **`dekt_signup.js` (自动报名)**
+    *   **功能**: 从 BoxJS 读取待报名列表，自动等待并在报名时间进行并发报名，成功后通知。
+    *   **特性**: 支持并发报名（T-0.5s ~ T+0.5s 窗口），提高抢课成功率。
 
 *   **`dekt_signin.js` (自动签到)**
     *   **功能**: 自动检查已报名课程并进行签到/签退（需配合 BoxJS 配置）。
+    *   **特性**: 支持虚拟定位、自动检测签到/签退时间窗口。
+
+*   **`dekt_unenroll.js` (取消报名)**
+    *   **功能**: 取消已报名的第二课堂课程。
+    *   **使用**: 手动运行，需在 BoxJS 配置课程 ID 和用户 ID。
+
+*   **`dekt_clean_blacklist.js` (清理黑名单)**
+    *   **功能**: 自动移除黑名单中已结束/已取消的课程 ID，保持黑名单整洁。
 
 ### 2. 校园卡 (Campus Card)
 
@@ -40,23 +49,45 @@
 
 *   **`card_cookie.js` (获取 Cookie)**
     *   **功能**: 监听校园卡查询页面的请求，获取 Session ID 和 OpenID。
-    *   **使用**: 进入“北理工校园卡”微信公众号 -> 账单查询，触发重写。
+    *   **使用**: 进入"北理工校园卡"微信公众号 -> 账单查询，触发重写。
+    *   **特性**: 从 URL/Cookie/Referer/Location/响应体多信源提取凭证。
 
 *   **`card_balance.js` (余额监控)**
     *   **功能**: 定时查询校园卡余额，低于设定值时发送通知。
+    *   **特性**: 支持 Gist 兜底读取凭证。
 
 *   **`card_query_trade.py` (交易查询)**
-    *   **功能**: Python 脚本，用于查询校园卡交易流水（需本地运行）。
+    *   **功能**: Python 脚本，用于查询校园卡交易流水并导出为 CSV/Excel。
+    *   **使用**: `python card_query_trade.py -d 60 -o output.xlsx`
 
 ### 3. 本地调试工具 (Node.js)
 
 前缀: `local_`
 
-*   **`local_dekt_debug.js`**: 本地运行 `dekt_monitor.js` 的封装。
+*   **`local_env.js`**: 本地 Env 环境模拟模块，为其他本地脚本提供配置读写和网络请求能力。
+*   **`local_dekt_monitor.js`**: 本地运行 `dekt_monitor.js` 的封装，支持指定报名 ID。
+    *   用法: `node local_dekt_monitor.js [--enrollId=123]`
 *   **`local_dekt_signin.js`**: 本地签到工具，支持虚拟定位。
-*   **`local_dekt_get_qr.js`**: 获取活动二维码（依赖 `unpack_capture.py`）。
+    *   用法: `node local_dekt_signin.js [课程ID1] [课程ID2] ...`
+*   **`local_dekt_my_activities.js`**: 本地运行我的活动脚本，验证时长字段获取逻辑。
+    *   用法: `node local_dekt_my_activities.js`
+*   **`local_dekt_unenroll.js`**: 本地取消报名工具。
+    *   用法: `node local_dekt_unenroll.js [--course=451] [--user=9028711]`
+*   **`local_dekt_get_qr.js`**: 获取活动二维码并保存到 `qrcodes/` 目录。
+    *   用法: `node local_dekt_get_qr.js`
 *   **`local_sync_gist.js`**: 从 Gist 同步配置到本地 `.env`。
-*   **`unpack_capture.py`**: 抓包解包工具。
+    *   用法: `node local_sync_gist.js`
+*   **`local_card_probe.js`**: 校园卡凭证探测工具，通过学工号获取 openid/JSESSIONID。
+    *   用法: 配置 `.env` 中的 `bit_card_idserial`，运行 `node local_card_probe.js`
+*   **`local_card_gist_check.js`**: 校园卡 Gist 校验工具，拉取并展示已存储的凭证。
+    *   用法: `node local_card_gist_check.js`
+
+### 4. 辅助工具
+
+*   **`audit_duration.js`**: 审计脚本，统计课程时长字段来源可靠性。
+    *   用法: `node audit_duration.js`
+*   **`unpack_capture.py`**: 抓包解包工具，解压 Proxyman/Charles 导出的数据。
+    *   用法: `python unpack_capture.py <root_dir> [keyword] [path_contains]`
 
 ## 使用说明
 ### Copilot 提示词

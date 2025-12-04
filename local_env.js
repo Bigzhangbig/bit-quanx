@@ -1,3 +1,26 @@
+/*
+ * 脚本名称：本地环境模拟模块
+ * 作者：Gemini for User
+ * 描述：为本地 Node.js 环境提供 Quantumult X Env 类的模拟实现。
+ *       用于本地调试脚本（local_*.js）加载使用。
+ * 
+ * 用法：
+ *   const Env = require('./local_env');
+ *   const $ = new Env('脚本名称');
+ * 
+ * 功能：
+ * - getdata(key)：从 .env 文件读取配置
+ * - setdata(val, key)：将配置写入 .env 文件
+ * - msg(title, subtitle, body)：在控制台输出通知
+ * - get(options, callback)：发起 HTTPS GET 请求
+ * - post(options, callback)：发起 HTTPS POST 请求
+ * - done(val)：标记脚本执行完成
+ * 
+ * 注意：
+ * - 配置文件路径为项目根目录下的 .env
+ * - 自动处理 gzip/deflate/br 压缩响应
+ */
+
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
