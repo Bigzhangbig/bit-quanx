@@ -40,14 +40,6 @@
           "desc": "输入课程ID（数字），用于报名/取消报名脚本"
         },
         {
-          "id": "bit_sc_user_id",
-          "name": "用户ID (自动获取)",
-          "val": "",
-          "type": "text",
-          "desc": "无需手动填写，从 Token 中解析获得",
-          "disabled": true
-        },
-        {
           "id": "bit_sc_blacklist",
           "name": "课程黑名单",
           "val": "",
@@ -271,6 +263,36 @@
           "desc": "仅通知包含选中类型的课程"
         },
         {
+          "id": "bit_sc_auto_categories",
+          "name": "自动报名栏目",
+          "val": "不限",
+          "type": "selects",
+          "items": [
+            { "key": "不限", "label": "不限" },
+            { "key": 1, "label": "理想信念" },
+            { "key": 2, "label": "科学素养" },
+            { "key": 3, "label": "社会贡献" },
+            { "key": 4, "label": "团队协作" },
+            { "key": 5, "label": "文化互鉴" },
+            { "key": 6, "label": "健康生活" }
+          ],
+          "desc": "选择要自动报名/捡漏的栏目（可多选），默认不限（全部栏目均可自动报名/捡漏）。建议使用 ID（默认已设置为 1-6）。"
+        },
+        {
+          "id": "bit_sc_runtime_sign_ids",
+          "name": "运行时自动签到课程ID",
+          "val": "",
+          "type": "text",
+          "desc": "目标课程ID（逗号/空格分隔）。无论列表接口返回与否，目标ID总会单独处理。仅设置一个ID时会跳过随机等待。与本地脚本参数等效，自动去重。autoSignAll=true时已处理过的课程会跳过。"
+        },
+        {
+          "id": "bit_sc_auto_sign_all",
+          "name": "自动签到/签退所有",
+          "val": false,
+          "type": "boolean",
+          "desc": "开启后自动处理所有待签到/签退课程（按列表接口）；目标ID若已在列表阶段处理过则跳过重复。默认关闭。"
+        },
+        {
           "id": "bit_sc_github_token",
           "name": "GitHub Token",
           "val": "",
@@ -292,18 +314,12 @@
           "desc": "Gist中存储Cookie的文件名"
         },
         {
-          "id": "bit_sc_runtime_sign_ids",
-          "name": "运行时自动签到课程ID",
+          "id": "bit_sc_user_id",
+          "name": "用户ID (自动获取)",
           "val": "",
           "type": "text",
-          "desc": "目标课程ID（逗号/空格分隔）。无论列表接口返回与否，目标ID总会单独处理。仅设置一个ID时会跳过随机等待。与本地脚本参数等效，自动去重。autoSignAll=true时已处理过的课程会跳过。"
-        },
-        {
-          "id": "bit_sc_auto_sign_all",
-          "name": "自动签到/签退所有",
-          "val": false,
-          "type": "boolean",
-          "desc": "开启后自动处理所有待签到/签退课程（按列表接口）；目标ID若已在列表阶段处理过则跳过重复。默认关闭。"
+          "desc": "无需手动填写，从 Token 中解析获得",
+          "disabled": true
         },
         {
           "id": "bit_sc_token",
