@@ -10,7 +10,6 @@
 - 修复：通知与日志中偶发的 `undefined` 标题；目标 ID 路径下会尽量解析并展示课程名称。
 - 逻辑：`autoSignAll=false` 时，目标 ID 一定会处理；`autoSignAll=true` 时，若该课程已在列表阶段处理过则跳过以避免重复。
 
-
 ## 脚本列表
 
 ### 1. 第二课堂 (Second Classroom)
