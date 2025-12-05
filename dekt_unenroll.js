@@ -1,14 +1,16 @@
 /*
  * 脚本名称：北理工第二课堂-取消报名
  * 作者：Gemini for User
- * 描述：取消已报名的第二课堂课程。复用 BoxJS 的"报名课程ID"与认证信息。
+ * 描述：取消已报名的第二课堂课程。复用 BoxJS 的认证信息。
+ *       若未指定取消报名课程ID，则使用最后一次成功报名的课程。
  * 
  * 注意事项：
  * - 仅手动运行（task.enabled=false）
  * - 若后端取消报名路径不同，请调整 CANCEL_PATH
  * 
  * BoxJS 配置项：
- * - bit_sc_signup_course_id / dekt_course_id / DEKT_COURSE_ID：课程ID
+ * - bit_sc_unenroll_course_id / dekt_course_id / DEKT_COURSE_ID：取消报名课程ID（可选，留空则使用最后成功报名的课程）
+ * - bit_sc_last_signup_id / bit_sc_last_signup_title：最后成功报名的课程ID和标题（自动记录）
  * - bit_sc_user_id / dekt_user_id / DEKT_USER_ID：用户ID
  * - bit_sc_token / dekt_token：认证Token
  * - bit_sc_headers / dekt_headers：请求Headers（可选）
@@ -24,7 +26,9 @@
 const HOST = "https://qcbldekt.bit.edu.cn";
 const $ = new Env("第二课堂取消报名");
 console.log("[unenroll] 脚本启动");
-const KEY_COURSE_IDS = ["bit_sc_signup_course_id", "dekt_signup_course_id", "dekt_course_id", "DEKT_COURSE_ID"];
+const KEY_COURSE_IDS = ["bit_sc_unenroll_course_id", "dekt_unenroll_course_id", "dekt_course_id", "DEKT_COURSE_ID"];
+const KEY_LAST_SIGNUP_ID = "bit_sc_last_signup_id"; // 最后成功报名课程ID Key
+const KEY_LAST_SIGNUP_TITLE = "bit_sc_last_signup_title"; // 最后成功报名课程标题 Key
 const KEY_HEADERS = ["bit_sc_headers", "dekt_headers", "DEKT_HEADERS"];
 const KEY_TOKENS = ["bit_sc_token", "dekt_token", "DEKT_TOKEN"];
 const KEY_BLACKLIST = "bit_sc_blacklist"; // 黑名单 Key
@@ -36,8 +40,24 @@ main();
 
 async function main() {
   try {
-    const courseId = getFirstPref(KEY_COURSE_IDS);
-    if (!courseId) return done("未找到课程ID，请在 BoxJS 中配置与报名脚本相同的“课程ID”");
+    // 优先读取用户指定的课程ID，若为空则使用最后成功报名的课程ID
+    let courseId = getFirstPref(KEY_COURSE_IDS);
+    let courseTitle = "";
+    let isUsingLastSignup = false;
+    
+    if (!courseId) {
+      // 尝试读取最后成功报名的课程ID
+      const lastSignupId = $.getdata(KEY_LAST_SIGNUP_ID);
+      const lastSignupTitle = $.getdata(KEY_LAST_SIGNUP_TITLE);
+      if (lastSignupId) {
+        courseId = lastSignupId;
+        courseTitle = lastSignupTitle || "";
+        isUsingLastSignup = true;
+        console.log(`[unenroll] 未指定课程ID，使用最后成功报名的课程: ID=${courseId}, 标题=${courseTitle}`);
+      } else {
+        return done("未找到课程ID，请在 BoxJS 中配置「取消报名课程ID」或先完成一次报名");
+      }
+    }
 
     let headers = tryParseJSON(getFirstPref(KEY_HEADERS)) || {};
     const token = getFirstPref(KEY_TOKENS);
@@ -56,15 +76,18 @@ async function main() {
     // 严格按照抓包，要求提供 user_id
     if (!userId) {
       const err = "缺少 user_id，请在 BoxJS 设置 dekt_user_id/bit_sc_user_id（或 DEKT_FORCE_USER_ID）";
-      notify("第二课堂取消报名", `课程ID: ${courseId}`, err);
+      const subTitle = courseTitle ? `课程: ${courseTitle} (ID: ${courseId})` : `课程ID: ${courseId}`;
+      notify("第二课堂取消报名", subTitle, err);
       console.log(`[unenroll] 终止：${err}`);
       return done(err);
     }
     const result = await tryCancel(courseId, userId, headers);
+    const subTitle = courseTitle ? `课程: ${courseTitle} (ID: ${courseId})` : `课程ID: ${courseId}`;
     if (result.ok) {
       // 取消报名成功后，自动将课程ID添加到黑名单
       const blacklistMsg = addToBlacklist(courseId);
-      notify("第二课堂取消报名", `课程ID: ${courseId}`, `已取消报名（${result.path}）${blacklistMsg}`);
+      const usingLastHint = isUsingLastSignup ? "\n📌 使用最后成功报名的课程" : "";
+      notify("第二课堂取消报名", subTitle, `已取消报名（${result.path}）${blacklistMsg}${usingLastHint}`);
       console.log(`[unenroll] 成功: path=${result.path} status=${result.status}`);
       return done();
     } else {
@@ -72,7 +95,7 @@ async function main() {
       const detail = parsed.message || parsed.msg || (typeof result.body === 'string' ? result.body.slice(0, 200) : "");
       const hint = (result.status === 401 || result.code === 401) ? "(Token 失效，请重新获取)" : "";
       const msg = `取消失败：HTTP ${result.status || "未知"} ${detail} ${hint} [${result.path || "未知接口"}]`;
-      notify("第二课堂取消报名", `课程ID: ${courseId}`, msg);
+      notify("第二课堂取消报名", subTitle, msg);
       console.log(`[unenroll] 失败: ${msg}`);
       return done(msg);
     }

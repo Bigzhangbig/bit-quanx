@@ -25,8 +25,10 @@ const CONFIG = {
     filterCollegeKey: "bit_sc_filter_college",
     filterGradeKey: "bit_sc_filter_grade",
     filterTypeKey: "bit_sc_filter_type",
-    filterAutoCategoriesKey: "bit_sc_auto_categories",
-    signupCourseIdKey: "bit_sc_signup_course_id", // 报名课程ID Key
+    filterAutoBlacklistCategoriesKey: "bit_sc_auto_blacklist_categories", // 自动报名栏目黑名单 Key
+    unenrollCourseIdKey: "bit_sc_unenroll_course_id", // 取消报名课程ID Key (已弃用原 signupCourseIdKey)
+    lastSignupIdKey: "bit_sc_last_signup_id", // 最后成功报名课程ID Key
+    lastSignupTitleKey: "bit_sc_last_signup_title", // 最后成功报名课程标题 Key
     blacklistKey: "bit_sc_blacklist", // 黑名单 Key (逗号分隔)
     blacklistKeywordsKey: "bit_sc_blacklist_keywords", // 黑名单关键词 Key (逗号分隔)
     
@@ -68,53 +70,44 @@ async function checkCourses() {
     const filterCollege = $.getdata(CONFIG.filterCollegeKey) || "不限";
     const filterGrade = $.getdata(CONFIG.filterGradeKey) || "不限";
     const filterType = $.getdata(CONFIG.filterTypeKey) || "不限";
-    // 自动报名/捡漏栏目配置（BoxJS 多选）："不限" 或 多选结果（CSV 或 JSON 数组）
-    const filterAutoCategoriesRaw = $.getdata(CONFIG.filterAutoCategoriesKey) || "不限";
+    // 自动报名/捡漏栏目黑名单配置（BoxJS 多选）：空或多选结果（CSV 或 JSON 数组）
+    const filterAutoBlacklistCategoriesRaw = $.getdata(CONFIG.filterAutoBlacklistCategoriesKey) || "";
 
-    // 解析允许自动报名的栏目（支持 ID 或名称），
-    // allowedAutoCategoryIds/Names 为 null 表示不限（允许所有栏目自动报名）
-    let allowedAutoCategoryIds = null;
-    let allowedAutoCategoryNames = null;
+    // 解析自动报名栏目黑名单（支持 ID 或名称），
+    // blacklistAutoCategoryIds/Names 为空数组表示无黑名单（允许所有栏目自动报名）
+    let blacklistAutoCategoryIds = [];
+    let blacklistAutoCategoryNames = [];
     try {
-        if (!filterAutoCategoriesRaw || filterAutoCategoriesRaw === "不限") {
-            allowedAutoCategoryIds = null;
-            allowedAutoCategoryNames = null;
-        } else {
+        if (filterAutoBlacklistCategoriesRaw && filterAutoBlacklistCategoriesRaw.trim()) {
             let items = [];
-            if (typeof filterAutoCategoriesRaw === 'string' && filterAutoCategoriesRaw.trim().startsWith('[')) {
-                items = JSON.parse(filterAutoCategoriesRaw);
-            } else if (Array.isArray(filterAutoCategoriesRaw)) {
-                items = filterAutoCategoriesRaw;
-            } else if (typeof filterAutoCategoriesRaw === 'string' && filterAutoCategoriesRaw.includes(',')) {
-                items = filterAutoCategoriesRaw.split(/[,，]/).map(s => s.trim()).filter(s => s);
-            } else if (typeof filterAutoCategoriesRaw === 'string') {
-                items = [filterAutoCategoriesRaw.trim()];
+            const raw = filterAutoBlacklistCategoriesRaw.trim();
+            if (raw.startsWith('[')) {
+                items = JSON.parse(raw);
+            } else if (Array.isArray(filterAutoBlacklistCategoriesRaw)) {
+                items = filterAutoBlacklistCategoriesRaw;
+            } else if (raw.includes(',')) {
+                items = raw.split(/[,，]/).map(s => s.trim()).filter(s => s);
             } else {
-                items = [String(filterAutoCategoriesRaw)];
+                items = [raw];
             }
 
             // Normalize into ID list and name list
-            const ids = [];
-            const names = [];
             for (const it of items) {
                 if (it === null || it === undefined) continue;
                 const s = String(it).trim();
-                if (s === '' || s === '不限') continue;
+                if (s === '') continue;
                 const n = parseInt(s, 10);
                 if (!Number.isNaN(n)) {
-                    ids.push(n);
+                    blacklistAutoCategoryIds.push(n);
                 }
                 // always keep the raw string name as well (for backward compatibility)
-                names.push(s);
+                blacklistAutoCategoryNames.push(s);
             }
-
-            allowedAutoCategoryIds = ids.length > 0 ? ids : null;
-            allowedAutoCategoryNames = names.length > 0 ? names : null;
         }
     } catch (e) {
-        console.log(`[Debug] 解析自动报名栏目失败: ${e}`);
-        allowedAutoCategoryIds = null;
-        allowedAutoCategoryNames = null;
+        console.log(`[Debug] 解析自动报名栏目黑名单失败: ${e}`);
+        blacklistAutoCategoryIds = [];
+        blacklistAutoCategoryNames = [];
     }
     
     // 获取黑名单(ID)
@@ -141,18 +134,6 @@ async function checkCourses() {
     // --- 新增：检查待报名列表 (仅 Debug 模式) ---
     if (isDebug) {
         await checkSignupList(token, headers);
-    }
-
-    // 优先处理指定报名ID
-    const envSignupId = $.getdata(CONFIG.signupCourseIdKey);
-    let currentMaxSignupId = envSignupId ? parseInt(envSignupId) : 0;
-    if (isNaN(currentMaxSignupId)) currentMaxSignupId = 0;
-
-    if (envSignupId) {
-        if (isDebug) console.log(`[Debug] 检测到指定报名ID: ${envSignupId}，尝试报名...`);
-        const envRes = await autoSignup(envSignupId, token, headers);
-        if (envRes.success) $.msg("✅ 指定课程报名成功", "", `ID: ${envSignupId}\n${envRes.message}`);
-        else if (isDebug) console.log(`[Debug] 指定课程 ${envSignupId} 报名结果: ${envRes.message}`);
     }
 
     if (isDebug) {
@@ -255,12 +236,12 @@ async function checkCourses() {
                         // Debug模式下：进行中、未报名、有名额
                         // 注意：如果 is_sign 不存在，默认为未报名，依靠后端去重
                         const isNotSigned = course.is_sign === undefined ? true : !course.is_sign;
-                        // 当前栏目是否允许自动报名/捡漏（allowedAutoCategoryIds/Names 都为 null 表示不限）
-                        const isCategoryAllowedForAuto = (
-                            (allowedAutoCategoryIds === null && allowedAutoCategoryNames === null) ||
-                            (Array.isArray(allowedAutoCategoryIds) && allowedAutoCategoryIds.includes(cat.id)) ||
-                            (Array.isArray(allowedAutoCategoryNames) && allowedAutoCategoryNames.includes(cat.name))
+                        // 当前栏目是否允许自动报名/捡漏（黑名单模式：黑名单为空表示全部允许，否则黑名单中的栏目不允许）
+                        const isCategoryBlacklisted = (
+                            (blacklistAutoCategoryIds.length > 0 && blacklistAutoCategoryIds.includes(cat.id)) ||
+                            (blacklistAutoCategoryNames.length > 0 && blacklistAutoCategoryNames.includes(cat.name))
                         );
+                        const isCategoryAllowedForAuto = !isCategoryBlacklisted;
                         const isPickupTarget = isPickupMode && status === 2 && isNotSigned && surplus > 0 && isCategoryAllowedForAuto;
 
                         // 如果课程ID大于缓存的ID，则是新课程；或者是捡漏模式下的捡漏目标；或者是未开始的课程(确保加入列表)
@@ -347,13 +328,17 @@ async function checkCourses() {
                                     let signupResultMsg = "";
                                     // 假设字段 is_sign, 1为已报名
                                     // 修改：如果是捡漏模式，或者发现了新课程(且未报名)，都直接尝试报名
-                                    // 仅当当前栏目在自动报名列表中才尝试自动报名；否则仅通知
+                                    // 仅当当前栏目不在黑名单中才尝试自动报名；否则仅通知
                                     if (!course.is_sign && isCategoryAllowedForAuto && (isPickupMode || isNew)) {
                                         console.log(`[Monitor][${cat.name}][ID:${course.id}] 尝试自动报名(新课程或捡漏): ${title}`);
                                         const signupRes = await autoSignup(course.id, token, headers);
                                         
                                         if (signupRes.success) {
                                             signupResultMsg = `\n✅ 自动报名成功: ${signupRes.message}`;
+                                            // 存储最后一次成功报名的课程ID和标题
+                                            $.setdata(course.id.toString(), CONFIG.lastSignupIdKey);
+                                            $.setdata(title, CONFIG.lastSignupTitleKey);
+                                            console.log(`[Monitor] 📝 已记录最后成功报名: ID=${course.id}, 标题=${title}`);
                                         } else {
                                             signupResultMsg = `\n❌ 自动报名失败: ${signupRes.message}`;
                                         }
@@ -372,7 +357,7 @@ async function checkCourses() {
                                     } else if (course.is_sign) {
                                         signupResultMsg = `\n⚠️ 已报名，跳过`;
                                     } else if (!isCategoryAllowedForAuto) {
-                                        signupResultMsg = `\n⚠️ 未在自动报名栏目列表，跳过自动报名`;
+                                        signupResultMsg = `\n⚠️ 在自动报名栏目黑名单中，跳过自动报名`;
                                     } else if (!isPickupMode && !isNew) {
                                         signupResultMsg = `\n⚠️ 未开启捡漏模式，跳过报名`;
                                     }
@@ -546,6 +531,10 @@ async function checkSignupList(token, headers) {
                     if (d != null) body += `\n⏱ 时长: ${d}分钟`;
                 } catch (_) {}
                 $.msg("✅ 自动报名成功", "", body);
+                // 存储最后一次成功报名的课程ID和标题
+                $.setdata(item.id.toString(), CONFIG.lastSignupIdKey);
+                $.setdata(item.title || "", CONFIG.lastSignupTitleKey);
+                console.log(`[CheckList] 📝 已记录最后成功报名: ID=${item.id}, 标题=${item.title}`);
                 hasChange = true; // 报名成功，移除
                 continue; // 不加入 newList
             } else {

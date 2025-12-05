@@ -5,7 +5,7 @@
  *   1) 在项目根目录创建 .env，至少包含：
  *        bit_sc_token=Bearer xxxxx
  *        dekt_user_id=9028711           # 或 bit_sc_user_id
- *        dekt_course_id=451             # 或 bit_sc_signup_course_id / DEKT_COURSE_ID
+ *        dekt_course_id=451             # 或 bit_sc_unenroll_course_id / DEKT_COURSE_ID（可选，留空则使用最后成功报名的课程）
  *      可选：
  *        bit_sc_headers={"User-Agent":"...","Referer":"...","Host":"qcbldekt.bit.edu.cn"}
  *   2) 运行：
@@ -37,7 +37,7 @@ for (const a of args) {
   if (argMap.course) {
     $.setdata(String(argMap.course), 'dekt_course_id');
     // 兼容其他键名
-    $.setdata(String(argMap.course), 'bit_sc_signup_course_id');
+    $.setdata(String(argMap.course), 'bit_sc_unenroll_course_id');
     $.setdata(String(argMap.course), 'DEKT_COURSE_ID');
     console.log(`[LocalSeed] 写入课程ID: ${argMap.course}`);
   }

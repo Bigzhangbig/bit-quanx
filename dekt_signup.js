@@ -17,6 +17,8 @@ const CONFIG = {
     headersKey: "bit_sc_headers",
     signupListKey: "bit_sc_signup_list", // 待报名列表 Key
     notifyNoUpdateKey: "bit_sc_notify_no_update", // 无更新通知开关
+    lastSignupIdKey: "bit_sc_last_signup_id", // 最后成功报名课程ID Key
+    lastSignupTitleKey: "bit_sc_last_signup_title", // 最后成功报名课程标题 Key
     
     // APIs
     applyUrl: "https://qcbldekt.bit.edu.cn/api/course/apply",
@@ -147,6 +149,11 @@ async function main() {
             if (result.success) {
                 log(`✅ 报名成功: ${result.message}`);
                 hasChange = true;
+                
+                // 存储最后一次成功报名的课程ID和标题
+                $.setdata(courseId.toString(), CONFIG.lastSignupIdKey);
+                $.setdata(title, CONFIG.lastSignupTitleKey);
+                log(`📝 已记录最后成功报名: ID=${courseId}, 标题=${title}`);
                 
                 // 报名成功后，获取课程详情查看状态
                 await new Promise(r => setTimeout(r, 2000));
