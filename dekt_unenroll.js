@@ -27,6 +27,7 @@ console.log("[unenroll] 脚本启动");
 const KEY_COURSE_IDS = ["bit_sc_signup_course_id", "dekt_signup_course_id", "dekt_course_id", "DEKT_COURSE_ID"];
 const KEY_HEADERS = ["bit_sc_headers", "dekt_headers", "DEKT_HEADERS"];
 const KEY_TOKENS = ["bit_sc_token", "dekt_token", "DEKT_TOKEN"];
+const KEY_BLACKLIST = "bit_sc_blacklist"; // 黑名单 Key
 
 // 取消报名接口路径（仅使用抓包确认的 API）
 const CANCEL_PATH = "/api/course/cancelApply";
@@ -61,7 +62,9 @@ async function main() {
     }
     const result = await tryCancel(courseId, userId, headers);
     if (result.ok) {
-      notify("第二课堂取消报名", `课程ID: ${courseId}`, `已取消报名（${result.path}）`);
+      // 取消报名成功后，自动将课程ID添加到黑名单
+      const blacklistMsg = addToBlacklist(courseId);
+      notify("第二课堂取消报名", `课程ID: ${courseId}`, `已取消报名（${result.path}）${blacklistMsg}`);
       console.log(`[unenroll] 成功: path=${result.path} status=${result.status}`);
       return done();
     } else {
@@ -177,6 +180,45 @@ function deriveUserId(token) {
 function toInt(v) {
   const n = parseInt(String(v), 10);
   return Number.isFinite(n) ? n : undefined;
+}
+
+// 将课程ID添加到黑名单
+function addToBlacklist(courseId) {
+  try {
+    const blacklistStr = $.getdata(KEY_BLACKLIST) || "";
+    // 解析已有的黑名单（支持逗号分隔或JSON数组格式）
+    let blacklist = [];
+    const trimmed = blacklistStr.trim();
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      // JSON 数组格式
+      try {
+        const arr = JSON.parse(trimmed);
+        if (Array.isArray(arr)) blacklist = arr.map(x => String(x).trim()).filter(Boolean);
+      } catch {
+        // JSON 解析失败，回退到逗号分隔格式
+        blacklist = trimmed.split(/[,，]/).map(id => id.trim()).filter(id => id);
+      }
+    } else {
+      // 逗号分隔格式
+      blacklist = trimmed.split(/[,，]/).map(id => id.trim()).filter(id => id);
+    }
+    
+    const courseIdStr = String(courseId).trim();
+    // 检查是否已在黑名单中
+    if (blacklist.includes(courseIdStr)) {
+      console.log(`[unenroll] 课程 ${courseIdStr} 已在黑名单中，无需重复添加`);
+      return "\n📝 已在黑名单中";
+    }
+    
+    // 添加到黑名单
+    blacklist.push(courseIdStr);
+    $.setdata(blacklist.join(","), KEY_BLACKLIST);
+    console.log(`[unenroll] 已将课程 ${courseIdStr} 添加到黑名单`);
+    return "\n📝 已自动添加到黑名单";
+  } catch (e) {
+    console.log(`[unenroll] 添加黑名单失败: ${e}`);
+    return "\n⚠️ 添加黑名单失败";
+  }
 }
 
 // Env Polyfill（与 activities 保持一致，支持 QuanX）

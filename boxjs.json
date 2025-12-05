@@ -45,7 +45,7 @@
           "name": "课程黑名单(ID)",
           "val": "",
           "type": "text",
-          "desc": "输入不想报名的课程ID，用逗号分隔"
+          "desc": "输入不想报名的课程ID，用逗号分隔。取消报名成功后会自动添加到此黑名单"
         },
         {
           "id": "bit_sc_blacklist_keywords",
