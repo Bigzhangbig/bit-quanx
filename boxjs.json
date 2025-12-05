@@ -4,14 +4,6 @@
   "author": "@Bigzhangbig",
   "icon": "https://avatars.githubusercontent.com/u/78358414",
   "repo": "https://github.com/Bigzhangbig/bit-dekt-quanx",
-  "onInstall": {
-    "title": "安装确认",
-    "message": "本订阅包含重写资源，是否需要自动安装？",
-    "install": {
-      "QuanX": "quantumult-x:///add-resource?remote-resource=%7B%22rewrite_remote%22%3A%5B%22https%3A%2F%2Fraw.githubusercontent.com%2FBigzhangbig%2Fbit-dekt-quanx%2Fdev%2Fdekt_rewrite.snippet%22%2C%22https%3A%2F%2Fraw.githubusercontent.com%2FBigzhangbig%2Fbit-dekt-quanx%2Fdev%2Fcard_rewrite.snippet%22%5D%7D",
-      "Loon": "loon://import?plugin=https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/dev/dekt_rewrite.snippet"
-    }
-  },
   "apps": [
     {
       "id": "bit_dekt",
@@ -292,14 +284,14 @@
             { "key": 5, "label": "文化互鉴" },
             { "key": 6, "label": "健康生活" }
           ],
-          "desc": "选择要自动报名/捡漏的栏目（可多选），默认不限（全部栏目均可自动报���/捡漏）。建议使用 ID（默认已设置为 1-6）。"
+          "desc": "选择要自动报名/捡漏的栏目（可多选），默认不限（全部栏目均可自动报名/捡漏）。建议使用 ID（默认已设置为 1-6）。"
         },
         {
           "id": "bit_sc_runtime_sign_ids",
           "name": "运行时自动签到课程ID",
           "val": "",
           "type": "text",
-          "desc": "目标课程ID（逗号/空格分隔）。无论列表接口返回与否，目标ID总会单独处理。仅设置一个ID时会跳过随机等待。与本地脚本参数等效。"
+          "desc": "目标课程ID（逗号/空格分隔）。无论列表接口返回与否，目标ID总会单独处理。仅设置一个ID时会跳过随机等待。与本地脚本参数等效，自动去重。autoSignAll=true时已处理过的课程会跳过。"
         },
         {
           "id": "bit_sc_auto_sign_all",
