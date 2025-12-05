@@ -191,8 +191,13 @@ function addToBlacklist(courseId) {
     const trimmed = blacklistStr.trim();
     if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
       // JSON 数组格式
-      const arr = JSON.parse(trimmed);
-      if (Array.isArray(arr)) blacklist = arr.map(x => String(x).trim()).filter(Boolean);
+      try {
+        const arr = JSON.parse(trimmed);
+        if (Array.isArray(arr)) blacklist = arr.map(x => String(x).trim()).filter(Boolean);
+      } catch {
+        // JSON 解析失败，回退到逗号分隔格式
+        blacklist = trimmed.split(/[,，]/).map(id => id.trim()).filter(id => id);
+      }
     } else {
       // 逗号分隔格式
       blacklist = trimmed.split(/[,，]/).map(id => id.trim()).filter(id => id);
