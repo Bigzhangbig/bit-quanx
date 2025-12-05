@@ -2,7 +2,7 @@
   "id": "bit_dekt_quanx",
   "name": "北理工第二课堂助手",
   "author": "@Bigzhangbig",
-  "icon": "https://avatars.githubusercontent.com/u/78358414",
+  "icon": "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
   "repo": "https://github.com/Bigzhangbig/bit-dekt-quanx",
   "apps": [
     {
@@ -28,9 +28,7 @@
         "bit_sc_runtime_sign_ids"
       ],
       "descs_html": [
-        "请先在 Quantumult X 中添加重写规则获取 Token。",
-        "脚本会自动监控第二课堂的新活动并发送通知。",
-        "新增：我的活动脚本，可监控待签到活动并快速获取签到二维码。"
+        "请先在 Quantumult X 中添加重写规则获取 Token。"
       ],
       "settings": [
         {
@@ -341,8 +339,8 @@
       "author": "@Bigzhangbig",
       "repo": "https://github.com/Bigzhangbig/bit-dekt-quanx",
       "icons": [
-        "https://avatars.githubusercontent.com/u/78358414",
-        "https://avatars.githubusercontent.com/u/78358414"
+        "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
+        "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png"
       ]
     },
     {
@@ -418,8 +416,8 @@
       "author": "@Bigzhangbig",
       "repo": "https://github.com/Bigzhangbig/bit-dekt-quanx",
       "icons": [
-        "https://raw.githubusercontent.com/Orz-3/mini/master/Color/BIT.png",
-        "https://raw.githubusercontent.com/Orz-3/mini/master/Color/BIT.png"
+        "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
+        "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png"
       ]
     }
   ],
