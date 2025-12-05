@@ -19,6 +19,7 @@
         "bit_sc_debug",
         "bit_sc_notify_no_update",
         "bit_sc_pickup_mode",
+        "bit_sc_auto_categories",
         "bit_sc_random_delay",
         "bit_sc_signup_list",
         "bit_sc_github_token",
