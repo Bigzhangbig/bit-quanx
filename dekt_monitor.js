@@ -136,9 +136,6 @@ async function checkCourses() {
         await checkSignupList(token, headers);
     }
 
-    // 优先处理指定报名ID (已移除此功能，原 signupCourseIdKey 已弃用)
-    // 现在使用 unenrollCourseIdKey 仅用于取消报名
-
     if (isDebug) {
         console.log(`[Debug] 开始运行监控脚本`);
         console.log(`[Debug] 筛选条件: 学院[${filterCollege}], 年级[${filterGrade}], 类型[${filterType}]`);
