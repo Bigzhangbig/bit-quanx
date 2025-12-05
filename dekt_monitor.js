@@ -28,6 +28,7 @@ const CONFIG = {
     filterAutoCategoriesKey: "bit_sc_auto_categories",
     signupCourseIdKey: "bit_sc_signup_course_id", // 报名课程ID Key
     blacklistKey: "bit_sc_blacklist", // 黑名单 Key (逗号分隔)
+    blacklistKeywordsKey: "bit_sc_blacklist_keywords", // 黑名单关键词 Key (逗号分隔)
     
     // 栏目ID映射
     categories: [
@@ -116,9 +117,13 @@ async function checkCourses() {
         allowedAutoCategoryNames = null;
     }
     
-    // 获取黑名单
+    // 获取黑名单(ID)
     const blacklistStr = $.getdata(CONFIG.blacklistKey) || "";
     const blacklist = blacklistStr.split(/[,，]/).map(id => id.trim()).filter(id => id); // 支持中英文逗号
+
+    // 获取黑名单关键词
+    const blacklistKeywordsStr = $.getdata(CONFIG.blacklistKeywordsKey) || "";
+    const blacklistKeywords = blacklistKeywordsStr.split(/[,，]/).map(kw => kw.trim()).filter(kw => kw); // 支持中英文逗号
 
     if (!token) {
         $.msg("❌ 未找到 Token", "", "请先运行 bit_cookie.js 脚本，并进入微信小程序“第二课堂”刷新任意列表以获取 Token。");
@@ -222,9 +227,17 @@ async function checkCourses() {
 
                     // 遍历返回的课程
                     for (let course of courses) {
-                        // 黑名单检查
+                        // 黑名单检查(ID)
                         if (blacklist.includes(course.id.toString())) {
-                            if (isDebug) console.log(`[Debug][${cat.name}][ID:${course.id}] 在黑名单中，跳过: ${course.title || '未知名称'}`);
+                            if (isDebug) console.log(`[Debug][${cat.name}][ID:${course.id}] 在黑名单(ID)中，跳过: ${course.title || '未知名称'}`);
+                            continue;
+                        }
+
+                        // 黑名单关键词检查
+                        const courseTitle = course.title || course.transcript_name || "";
+                        const matchedKeyword = blacklistKeywords.find(kw => courseTitle.includes(kw));
+                        if (matchedKeyword) {
+                            if (isDebug) console.log(`[Debug][${cat.name}][ID:${course.id}] 标题命中黑名单关键词[${matchedKeyword}]，跳过: ${courseTitle}`);
                             continue;
                         }
 

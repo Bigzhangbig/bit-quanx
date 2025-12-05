@@ -15,6 +15,7 @@
         "bit_sc_cache",
         "bit_sc_signup_course_id",
         "bit_sc_blacklist",
+        "bit_sc_blacklist_keywords",
         "bit_sc_debug",
         "bit_sc_notify_no_update",
         "bit_sc_pickup_mode",
@@ -41,10 +42,17 @@
         },
         {
           "id": "bit_sc_blacklist",
-          "name": "课程黑名单",
+          "name": "课程黑名单(ID)",
           "val": "",
           "type": "text",
           "desc": "输入不想报名的课程ID，用逗号分隔"
+        },
+        {
+          "id": "bit_sc_blacklist_keywords",
+          "name": "黑名单关键词",
+          "val": "",
+          "type": "text",
+          "desc": "输入黑名单关键词，用逗号分隔（如：研讨会,讲座）。课程标题包含任一关键词则不自动报名、不加入待报名列表"
         },
         {
           "id": "bit_sc_debug",
