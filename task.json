@@ -5,7 +5,7 @@
     "*/5 7-23 * * * https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/dekt_monitor.js, tag=第二课堂监控, enabled=true",
     "*/30 * * * * https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/dekt_signup.js, tag=第二课堂报名, enabled=true",
     "0 8,12,18 * * * https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/dekt_my_activities.js, tag=第二课堂我的活动, enabled=true",
-    "0 8-22/1 * * * https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/dekt_signin.js, tag=第二课堂签到, enabled=false",
+    "*/15 8-22/1 * * * https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/dekt_signin.js, tag=第二课堂签到, enabled=false",
     "0 12 * * * https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/card_balance.js, tag=校园卡余额监控, enabled=true",
     "0 0 1 1 * https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/dekt_unenroll.js, tag=第二课堂取消报名(手动), enabled=false",
     "0 3 * * * https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/dekt_clean_blacklist.js, tag=清理黑名单, enabled=true"

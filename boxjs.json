@@ -2,7 +2,7 @@
   "id": "bit_dekt_quanx",
   "name": "北理工第二课堂助手",
   "author": "@Bigzhangbig",
-  "icon": "https://avatars.githubusercontent.com/u/78358414",
+  "icon": "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
   "repo": "https://github.com/Bigzhangbig/bit-dekt-quanx",
   "apps": [
     {
@@ -13,7 +13,9 @@
         "bit_sc_headers",
         "bit_sc_user_id",
         "bit_sc_cache",
-        "bit_sc_signup_course_id",
+        "bit_sc_unenroll_course_id",
+        "bit_sc_last_signup_id",
+        "bit_sc_last_signup_title",
         "bit_sc_blacklist",
         "bit_sc_blacklist_keywords",
         "bit_sc_debug",
@@ -25,27 +27,42 @@
         "bit_sc_gist_id",
         "bit_sc_gist_filename",
         "bit_sc_auto_sign_all",
-        "bit_sc_runtime_sign_ids"
+        "bit_sc_runtime_sign_ids",
+        "bit_sc_auto_blacklist_categories"
       ],
       "descs_html": [
-        "请先在 Quantumult X 中添加重写规则获取 Token。",
-        "脚本会自动监控第二课堂的新活动并发送通知。",
-        "新增：我的活动脚本，可监控待签到活动并快速获取签到二维码。"
+        "请先在 Quantumult X 中添加重写规则获取 Token。"
       ],
       "settings": [
         {
-          "id": "bit_sc_signup_course_id",
-          "name": "报名课程ID",
+          "id": "bit_sc_unenroll_course_id",
+          "name": "取消报名课程ID",
           "val": "",
           "type": "text",
-          "desc": "输入课程ID（数字），用于报名/取消报名脚本"
+          "desc": "输入要取消报名的课程ID（数字），留空则使用最后一次成功报名的课程ID"
+        },
+        {
+          "id": "bit_sc_last_signup_id",
+          "name": "最后成功报名课程ID (自动)",
+          "val": "",
+          "type": "text",
+          "desc": "自动记录最后一次成功报名的课程ID",
+          "disabled": true
+        },
+        {
+          "id": "bit_sc_last_signup_title",
+          "name": "最后成功报名课程名 (自动)",
+          "val": "",
+          "type": "text",
+          "desc": "自动记录最后一次成功报名的课程名称",
+          "disabled": true
         },
         {
           "id": "bit_sc_blacklist",
           "name": "课程黑名单(ID)",
           "val": "",
           "type": "text",
-          "desc": "输入不想报名的课程ID，用逗号分隔"
+          "desc": "输入不想报名的课程ID，用逗号分隔。取消报名成功后会自动添加到此黑名单"
         },
         {
           "id": "bit_sc_blacklist_keywords",
@@ -271,12 +288,11 @@
           "desc": "仅通知包含选中类型的课程"
         },
         {
-          "id": "bit_sc_auto_categories",
-          "name": "自动报名栏目",
-          "val": "不限",
+          "id": "bit_sc_auto_blacklist_categories",
+          "name": "自动报名栏目黑名单",
+          "val": "",
           "type": "selects",
           "items": [
-            { "key": "不限", "label": "不限" },
             { "key": 1, "label": "理想信念" },
             { "key": 2, "label": "科学素养" },
             { "key": 3, "label": "社会贡献" },
@@ -284,7 +300,7 @@
             { "key": 5, "label": "文化互鉴" },
             { "key": 6, "label": "健康生活" }
           ],
-          "desc": "选择要自动报名/捡漏的栏目（可多选），默认不限（全部栏目均可自动报名/捡漏）。建议使用 ID（默认已设置为 1-6）。"
+          "desc": "选择不自动报名/捡漏的栏目（可多选），留空表示全部栏目均可自动报名/捡漏。被选中的栏目将不会自动报名。"
         },
         {
           "id": "bit_sc_runtime_sign_ids",
@@ -341,8 +357,8 @@
       "author": "@Bigzhangbig",
       "repo": "https://github.com/Bigzhangbig/bit-dekt-quanx",
       "icons": [
-        "https://avatars.githubusercontent.com/u/78358414",
-        "https://avatars.githubusercontent.com/u/78358414"
+        "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
+        "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png"
       ]
     },
     {
@@ -418,8 +434,8 @@
       "author": "@Bigzhangbig",
       "repo": "https://github.com/Bigzhangbig/bit-dekt-quanx",
       "icons": [
-        "https://raw.githubusercontent.com/Orz-3/mini/master/Color/BIT.png",
-        "https://raw.githubusercontent.com/Orz-3/mini/master/Color/BIT.png"
+        "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
+        "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png"
       ]
     }
   ],
