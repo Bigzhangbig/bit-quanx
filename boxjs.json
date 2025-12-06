@@ -2,7 +2,7 @@
   "id": "bit_dekt_quanx",
   "name": "北理工第二课堂助手",
   "author": "@Bigzhangbig",
-  "icon": "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
+  "icon": "https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
   "repo": "https://github.com/Bigzhangbig/bit-dekt-quanx",
   "onInstall": {
     "title": "安装重写规则 - Install Rewrite Rules",
@@ -342,8 +342,8 @@
       "author": "@Bigzhangbig",
       "repo": "https://github.com/Bigzhangbig/bit-dekt-quanx",
       "icons": [
-        "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
-        "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png"
+        "https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
+        "https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png"
       ]
     },
     {
