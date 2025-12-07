@@ -464,6 +464,7 @@
   "boxjs": {
     "pickup_mode": "false",
     "auto_sign_all": "false",
+    "chavy_boxjs_app_subCaches": "{}",
     "signup_list": "[]",
     "runtime_sign_ids": ""
   }
