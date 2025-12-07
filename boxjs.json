@@ -2,7 +2,7 @@
   "id": "bit_dekt_quanx",
   "name": "北理工第二课堂助手",
   "author": "@Bigzhangbig",
-  "icon": "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
+  "icon": "https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
   "repo": "https://github.com/Bigzhangbig/bit-dekt-quanx",
   "onInstall": {
     "title": "安装重写规则 - Install Rewrite Rules",
@@ -314,8 +314,8 @@
       "author": "@Bigzhangbig",
       "repo": "https://github.com/Bigzhangbig/bit-dekt-quanx",
       "icons": [
-        "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
-        "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png"
+        "https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
+        "https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png"
       ]
       ,
       "scripts": [
@@ -325,7 +325,7 @@
           "desc": "若未在 BoxJS 中指定取消报名课程ID，脚本将读取自动记录的最后一次成功报名课程（键：bit_sc_last_signup）并对其执行取消报名；取消成功后会自动将该课程ID添加到课程黑名单（键：bit_sc_blacklist）。"
         },
         {
-          "name": "签到 - Signin",
+          "name": "签到 - Sign In",
           "script": "https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/dekt_signin.js"
         },
         {
@@ -370,8 +370,8 @@
       "author": "@Bigzhangbig",
       "repo": "https://github.com/Bigzhangbig/bit-dekt-quanx",
       "icons": [
-        "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
-        "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png"
+        "https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
+        "https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png"
       ],
       "scripts": [
         {
