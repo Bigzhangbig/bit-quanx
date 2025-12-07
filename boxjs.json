@@ -439,7 +439,6 @@
           "desc": "校园卡 OpenID (自动获取)",
           "disabled": true
         }
-        ,
         {
           "id": "bit_sc_user_id",
           "name": "第二课堂 用户ID (自动获取)",
