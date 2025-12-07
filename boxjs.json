@@ -2,7 +2,7 @@
   "id": "bit_dekt_quanx",
   "name": "北理工第二课堂助手",
   "author": "@Bigzhangbig",
-  "icon": "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
+  "icon": "https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
   "repo": "https://github.com/Bigzhangbig/bit-dekt-quanx",
   "onInstall": {
     "title": "安装重写规则 - Install Rewrite Rules",
@@ -18,13 +18,9 @@
       "id": "bit_dekt",
       "name": "北理工第二课堂",
       "keys": [
-        "bit_sc_token",
         "bit_sc_headers",
-        "bit_sc_user_id",
         "bit_sc_cache",
         "bit_sc_unenroll_course_id",
-        "bit_sc_last_signup_id",
-        "bit_sc_last_signup_title",
         "bit_sc_blacklist",
         "bit_sc_blacklist_keywords",
         "bit_sc_debug",
@@ -48,19 +44,11 @@
           "desc": "输入要取消报名的课程ID（数字），留空则使用最后一次成功报名的课程ID"
         },
         {
-          "id": "bit_sc_last_signup_id",
-          "name": "最后成功报名课程ID (自动)",
-          "val": "",
+          "id": "bit_sc_last_signup",
+          "name": "最后成功报名课程(自动)",
+          "val": "{}",
           "type": "text",
-          "desc": "自动记录最后一次成功报名的课程ID",
-          "disabled": true
-        },
-        {
-          "id": "bit_sc_last_signup_title",
-          "name": "最后成功报名课程名 (自动)",
-          "val": "",
-          "type": "text",
-          "desc": "自动记录最后一次成功报名的课程名称",
+          "desc": "自动记录最后一次成功报名的课程，格式：{\"id\":123,\"title\":\"xx\",\"time\":\"2025-..\"}",
           "disabled": true
         },
         {
@@ -321,39 +309,20 @@
           "val": false,
           "type": "boolean",
           "desc": "开启后自动处理所有待签到/签退课程（按列表接口）；目标ID若已在列表阶段处理过则跳过重复。默认关闭。"
-        },
-        {
-          "id": "bit_sc_user_id",
-          "name": "用户ID (自动获取)",
-          "val": "",
-          "type": "text",
-          "desc": "无需手动填写，从 Token 中解析获得",
-          "disabled": true
-        },
-        {
-          "id": "bit_sc_token",
-          "name": "Token (自动获取)",
-          "val": "",
-          "type": "text",
-          "desc": "无需手动填写，请通过重写获取",
-          "disabled": true
         }
       ],
       "author": "@Bigzhangbig",
       "repo": "https://github.com/Bigzhangbig/bit-dekt-quanx",
       "icons": [
-        "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
-        "https://raw.github.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png"
+        "https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png",
+        "https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/BIT.png"
       ]
-    },
-    {
-      "id": "dekt",
-      "name": "本地 dekt 脚本",
-      "desc": "本地脚本：取消报名、签到、我的活动、监控",
+      ,
       "scripts": [
         {
           "name": "取消报名 - Unenroll",
-          "script": "https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/dekt_unenroll.js"
+          "script": "https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/dekt_unenroll.js",
+          "desc": "若未在 BoxJS 中指定取消报名课程ID，脚本将读取自动记录的最后一次成功报名课程（键：bit_sc_last_signup）并对其执行取消报名；取消成功后会自动将该课程ID添加到课程黑名单（键：bit_sc_blacklist）。"
         },
         {
           "name": "签到 - Sign In",
@@ -367,10 +336,9 @@
           "name": "监控 - Monitor",
           "script": "https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/dekt_monitor.js"
         }
-      ],
-      "author": "@Bigzhangbig",
-      "repo": "https://github.com/Bigzhangbig/bit-dekt-quanx"
+      ]
     },
+    
     {
       "id": "bit_card",
       "name": "北理工校园卡助手",
@@ -422,7 +390,9 @@
         "bit_sc_gist_filename",
         "bit_card_gist_filename",
         "bit_card_jsessionid",
-        "bit_card_openid"
+        "bit_card_openid",
+        "bit_sc_user_id",
+        "bit_sc_token"
       ],
       "settings": [
         {
@@ -467,6 +437,22 @@
           "val": "",
           "type": "text",
           "desc": "校园卡 OpenID (自动获取)",
+          "disabled": true
+        }
+        {
+          "id": "bit_sc_user_id",
+          "name": "第二课堂 用户ID (自动获取)",
+          "val": "",
+          "type": "text",
+          "desc": "无需手动填写，从 Token 中解析获得",
+          "disabled": true
+        },
+        {
+          "id": "bit_sc_token",
+          "name": "第二课堂 Token (自动获取)",
+          "val": "",
+          "type": "text",
+          "desc": "无需手动填写，请通过重写获取",
           "disabled": true
         }
       ],

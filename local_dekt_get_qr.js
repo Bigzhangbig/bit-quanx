@@ -150,8 +150,8 @@ if (!fs.existsSync(CONFIG.saveDir)) {
                         let inTimeRange = false;
                         let timeMsg = "";
 
-                        const isSignIn = statusLabel && statusLabel.includes("待签到");
-                        const isSignOut = statusLabel && statusLabel.includes("待签退");
+                        const isSignIn = statusLabel && String(statusLabel).trim() === "待签到";
+                        const isSignOut = statusLabel && String(statusLabel).trim() === "待签退";
 
                         if (isSignIn) {
                             if (!signInEnd || now <= signInEnd) {
@@ -206,8 +206,8 @@ if (!fs.existsSync(CONFIG.saveDir)) {
                     
                     // 检查是否需要签到/签退 (仅针对计时类活动)
                     if (item.completion_flag === 'time') {
-                        const isSignIn = statusLabel && statusLabel.includes("待签到");
-                        const isSignOut = statusLabel && statusLabel.includes("待签退");
+                        const isSignIn = statusLabel && String(statusLabel).trim() === "待签到";
+                        const isSignOut = statusLabel && String(statusLabel).trim() === "待签退";
                         
                         if (isSignIn && item.sign_in_end_time) {
                             console.log(`⚠️ 签到截止: ${item.sign_in_end_time}`);

@@ -10,7 +10,7 @@
  * 
  * BoxJS 配置项：
  * - bit_sc_unenroll_course_id / dekt_course_id / DEKT_COURSE_ID：取消报名课程ID（可选，留空则使用最后成功报名的课程）
- * - bit_sc_last_signup_id / bit_sc_last_signup_title：最后成功报名的课程ID和标题（自动记录）
+ * - bit_sc_last_signup：最后成功报名的课程对象（自动记录，格式 {id,title,time}）
  * - bit_sc_user_id / dekt_user_id / DEKT_USER_ID：用户ID
  * - bit_sc_token / dekt_token：认证Token
  * - bit_sc_headers / dekt_headers：请求Headers（可选）
@@ -27,8 +27,7 @@ const HOST = "https://qcbldekt.bit.edu.cn";
 const $ = new Env("第二课堂取消报名");
 console.log("[unenroll] 脚本启动");
 const KEY_COURSE_IDS = ["bit_sc_unenroll_course_id", "dekt_unenroll_course_id", "dekt_course_id", "DEKT_COURSE_ID"];
-const KEY_LAST_SIGNUP_ID = "bit_sc_last_signup_id"; // 最后成功报名课程ID Key
-const KEY_LAST_SIGNUP_TITLE = "bit_sc_last_signup_title"; // 最后成功报名课程标题 Key
+const KEY_LAST_SIGNUP = "bit_sc_last_signup"; // 最后成功报名课程 Key (JSON 对象)
 const KEY_HEADERS = ["bit_sc_headers", "dekt_headers", "DEKT_HEADERS"];
 const KEY_TOKENS = ["bit_sc_token", "dekt_token", "DEKT_TOKEN"];
 const KEY_BLACKLIST = "bit_sc_blacklist"; // 黑名单 Key
@@ -46,12 +45,12 @@ async function main() {
     let isUsingLastSignup = false;
     
     if (!courseId) {
-      // 尝试读取最后成功报名的课程ID
-      const lastSignupId = $.getdata(KEY_LAST_SIGNUP_ID);
-      const lastSignupTitle = $.getdata(KEY_LAST_SIGNUP_TITLE);
-      if (lastSignupId) {
-        courseId = lastSignupId;
-        courseTitle = lastSignupTitle || "";
+      // 尝试读取最后成功报名的课程对象
+      const lastStr = $.getdata(KEY_LAST_SIGNUP);
+      const parsed = tryParseJSON(lastStr) || {};
+      if (parsed && parsed.id) {
+        courseId = String(parsed.id);
+        courseTitle = parsed.title || "";
         isUsingLastSignup = true;
         console.log(`[unenroll] 未指定课程ID，使用最后成功报名的课程: ID=${courseId}, 标题=${courseTitle}`);
       } else {

@@ -27,8 +27,7 @@ const CONFIG = {
     filterTypeKey: "bit_sc_filter_type",
     filterAutoBlacklistCategoriesKey: "bit_sc_auto_blacklist_categories", // 自动报名栏目黑名单 Key
     unenrollCourseIdKey: "bit_sc_unenroll_course_id", // 取消报名课程ID Key (已弃用原 signupCourseIdKey)
-    lastSignupIdKey: "bit_sc_last_signup_id", // 最后成功报名课程ID Key
-    lastSignupTitleKey: "bit_sc_last_signup_title", // 最后成功报名课程标题 Key
+    lastSignupKey: "bit_sc_last_signup", // 最后成功报名课程 Key (存为 JSON 对象 {id,title,time})
     blacklistKey: "bit_sc_blacklist", // 黑名单 Key (逗号分隔)
     blacklistKeywordsKey: "bit_sc_blacklist_keywords", // 黑名单关键词 Key (逗号分隔)
     
@@ -345,10 +344,12 @@ async function checkCourses() {
                                         
                                         if (signupRes.success) {
                                             signupResultMsg = `\n✅ 自动报名成功: ${signupRes.message}`;
-                                            // 存储最后一次成功报名的课程ID和标题
-                                            $.setdata(course.id.toString(), CONFIG.lastSignupIdKey);
-                                            $.setdata(title, CONFIG.lastSignupTitleKey);
-                                            console.log(`[Monitor] 📝 已记录最后成功报名: ID=${course.id}, 标题=${title}`);
+                                            // 存储最后一次成功报名的课程（JSON 对象，便于与待报名列表保持一致）
+                                            try {
+                                                const lastObj = { id: course.id, title: title, time: (new Date()).toISOString() };
+                                                $.setdata(JSON.stringify(lastObj), CONFIG.lastSignupKey);
+                                                console.log(`[Monitor] 📝 已记录最后成功报名: ${JSON.stringify(lastObj)}`);
+                                            } catch (e) { console.log(`[Monitor] 记录最后报名失败: ${e}`); }
                                         } else {
                                             signupResultMsg = `\n❌ 自动报名失败: ${signupRes.message}`;
                                         }
@@ -541,10 +542,12 @@ async function checkSignupList(token, headers) {
                     if (d != null) body += `\n⏱ 时长: ${d}分钟`;
                 } catch (_) {}
                 $.msg("✅ 自动报名成功", "", body);
-                // 存储最后一次成功报名的课程ID和标题
-                $.setdata(item.id.toString(), CONFIG.lastSignupIdKey);
-                $.setdata(item.title || "", CONFIG.lastSignupTitleKey);
-                console.log(`[CheckList] 📝 已记录最后成功报名: ID=${item.id}, 标题=${item.title}`);
+                // 存储最后一次成功报名的课程（JSON 对象）
+                try {
+                    const lastObj = { id: item.id, title: item.title || "", time: (new Date()).toISOString() };
+                    $.setdata(JSON.stringify(lastObj), CONFIG.lastSignupKey);
+                    console.log(`[CheckList] 📝 已记录最后成功报名: ${JSON.stringify(lastObj)}`);
+                } catch (e) { console.log(`[CheckList] 记录最后报名失败: ${e}`); }
                 hasChange = true; // 报名成功，移除
                 continue; // 不加入 newList
             } else {

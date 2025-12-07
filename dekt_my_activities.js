@@ -244,16 +244,16 @@ async function processItems(items, headers) {
         // status: 0 (待签到), 1 (待签退), 2 (补卡), 3 (已结束)
         // 抓包示例: status:0 -> 待签到, status:1 -> 待签退
 
-        // 去除已取消的课程（如 status_label 包含 '已取消' 或 status 为 4）
-        if (item.status_label && item.status_label.includes("已取消")) {
+        // 去除已取消的课程（精确匹配 '已取消' 或 status 为 4）
+        if (item.status_label && String(item.status_label).trim() === "已取消") {
             continue;
         }
         if (typeof item.status !== 'undefined' && (item.status === 4 || item.status === '4')) {
             continue;
         }
 
-        const isSignIn = item.status_label && item.status_label.includes("待签到");
-        const isSignOut = item.status_label && item.status_label.includes("待签退");
+        const isSignIn = item.status_label && String(item.status_label).trim() === "待签到";
+        const isSignOut = item.status_label && String(item.status_label).trim() === "待签退";
 
         if (isSignIn || isSignOut) {
             const endTimeStr = isSignIn ? item.sign_in_end_time : item.sign_out_end_time;
