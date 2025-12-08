@@ -81,7 +81,7 @@ async function main() {
                 if (coursesInWindow.length === 1) {
                     const only = coursesInWindow[0];
                     const body = `${only.id}|${only.column}|${only.title}\n处在${only.when}窗口：${only.timeRange}\n时长：${only.duration}`;
-                    notify($.name, body, { force: true });
+                    notify($.name, "仅有一门课程在窗口", body, { force: true });
                 }
             } catch (e) {}
         }
