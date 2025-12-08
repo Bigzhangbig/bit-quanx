@@ -15,9 +15,10 @@ const CONFIG = {
     // BoxJS Keys
     tokenKey: "bit_sc_token",
     headersKey: "bit_sc_headers",
+    userIdKey: "bit_sc_user_id", // 用户ID Key
     signupListKey: "bit_sc_signup_list", // 待报名列表 Key
     notifyNoUpdateKey: "bit_sc_notify_no_update", // 无更新通知开关
-    lastSignupKey: "bit_sc_last_signup", // 最后成功报名课程 Key (存为 JSON 对象 {id,title,time})
+    lastSignupKey: "bit_sc_last_signup", // 最后成功报名课程 Key (存为 JSON 对象 {id,title,time,user_id})
     
     // APIs
     applyUrl: "https://qcbldekt.bit.edu.cn/api/course/apply",
@@ -42,6 +43,7 @@ function log(msg) { console.log(`${LOG_PREFIX} ${msg}`); }
 async function main() {
     const token = $.getdata(CONFIG.tokenKey);
     const savedHeaders = $.getdata(CONFIG.headersKey);
+    const userId = $.getdata(CONFIG.userIdKey) || deriveUserId(token);
     const isNotifyNoUpdate = $.getdata(CONFIG.notifyNoUpdateKey) === "true";
     let hasNotified = false;
     
@@ -151,7 +153,7 @@ async function main() {
                 
                 // 存储最后一次成功报名的课程（JSON 对象）
                 try {
-                    const lastObj = { id: courseId, title: title, time: (new Date()).toISOString() };
+                    const lastObj = { id: courseId, title: title, time: (new Date()).toISOString(), user_id: userId || null };
                     $.setdata(JSON.stringify(lastObj), CONFIG.lastSignupKey);
                     log(`📝 已记录最后成功报名: ${JSON.stringify(lastObj)}`);
                 } catch (e) { log(`记录最后报名失败: ${e}`); }
@@ -333,6 +335,17 @@ function computeCourseInfoMessage(courseInfo, title, courseId) {
         subMsg += `\n⏰ 签退: ${courseInfo.sign_out_start_time} - ${courseInfo.sign_out_end_time}`;
     }
     return { statusMsg: statusLabel, subMsg };
+}
+
+function deriveUserId(authorizationHeader) {
+    try {
+        if (!authorizationHeader) return "";
+        // 支持 "Bearer 611156|xxxx" 或 "611156|xxxx"
+        let raw = String(authorizationHeader).trim();
+        if (raw.toLowerCase().startsWith("bearer ")) raw = raw.slice(7).trim();
+        const first = raw.split("|")[0].trim();
+        return /^\d+$/.test(first) ? first : "";
+    } catch (_) { return ""; }
 }
 
 // Env Polyfill
