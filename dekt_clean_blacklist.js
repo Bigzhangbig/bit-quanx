@@ -84,24 +84,22 @@ const CONFIG = {
                 console.log(`[clean_blacklist] 查询课程 ${id} 详情时异常: ${e}`);
             }
 
-            // 如果仍未确定且没有全量列表，则尝试使用全量列表（若尚未尝试）
-            if (!keep && fullCourseList && !fullCourseList.find(c => String(c.id) === String(id))) {
-                // 在全量列表未找到 -> 该课程可能已被删除或历史课程，视作需要移除
-                removed.push(id);
-                continue;
-            }
-
             if (keep) {
                 remaining.push(id);
-            } else if (!keep && fullCourseList && fullCourseList.find(c => String(c.id) === String(id))) {
-                // 在全量列表找到但状态为 3 或 4
-                removed.push(id);
-            } else if (!keep && !fullCourseList) {
+            } else if (fullCourseList) {
+                const course = fullCourseList.find(c => c && String(c.id) === String(id));
+                if (!course) {
+                    // 在全量列表未找到 -> 该课程可能已被删除或历史课程，视作需要移除
+                    removed.push(id);
+                } else {
+                    // 在全量列表找到但状态为 3 或 4
+                    removed.push(id);
+                }
+            } else {
                 // 无法判定（既未获得详情也无全量列表），为安全起见记录到 unknownRemoved 并移除
                 unknownRemoved.push(id);
             }
         }
-
         // 写回 BoxJS（统一为逗号分隔格式）
         $.setdata(remaining.join(","), CONFIG.blacklistKey);
 
