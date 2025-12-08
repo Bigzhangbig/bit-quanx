@@ -352,6 +352,11 @@ async function checkCourses() {
                                                 $.setdata(JSON.stringify(lastObj), CONFIG.lastSignupKey);
                                                 console.log(`[Monitor] 📝 已记录最后成功报名: ${JSON.stringify(lastObj)}`);
                                             } catch (e) { console.log(`[Monitor] 记录最后报名失败: ${e}`); }
+                                            // 报名成功后自动加入黑名单，防止重复处理
+                                            try {
+                                                const blMsg = addToBlacklist(course.id);
+                                                if (isDebug) console.log(`[Monitor] addToBlacklist: ${blMsg}`);
+                                            } catch (e) { console.log(`[Monitor] 添加黑名单失败: ${e}`); }
                                         } else {
                                             signupResultMsg = `\n❌ 自动报名失败: ${signupRes.message}`;
                                         }
@@ -655,6 +660,40 @@ function deriveUserId(authorizationHeader) {
         const first = raw.split("|")[0].trim();
         return /^\d+$/.test(first) ? first : "";
     } catch (_) { return ""; }
+}
+
+// 将课程ID添加到黑名单（本文件局部实现，使用 CONFIG.blacklistKey）
+function addToBlacklist(courseId) {
+    try {
+        const blacklistStr = $.getdata(CONFIG.blacklistKey) || "";
+        // 解析已有的黑名单（支持逗号分隔或JSON数组格式）
+        let blacklist = [];
+        const trimmed = String(blacklistStr).trim();
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            try {
+                const arr = JSON.parse(trimmed);
+                if (Array.isArray(arr)) blacklist = arr.map(x => String(x).trim()).filter(Boolean);
+            } catch {
+                blacklist = trimmed.split(/[,，]/).map(id => id.trim()).filter(id => id);
+            }
+        } else {
+            blacklist = trimmed.split(/[,，]/).map(id => id.trim()).filter(id => id);
+        }
+
+        const courseIdStr = String(courseId).trim();
+        if (blacklist.includes(courseIdStr)) {
+            console.log(`[monitor] 课程 ${courseIdStr} 已在黑名单中，无需重复添加`);
+            return "\n📝 已在黑名单中";
+        }
+
+        blacklist.push(courseIdStr);
+        $.setdata(blacklist.join(","), CONFIG.blacklistKey);
+        console.log(`[monitor] 已将课程 ${courseIdStr} 添加到黑名单`);
+        return "\n📝 已自动添加到黑名单";
+    } catch (e) {
+        console.log(`[monitor] 添加黑名单失败: ${e}`);
+        return "\n⚠️ 添加黑名单失败";
+    }
 }
 
 // --- Env Polyfill ---

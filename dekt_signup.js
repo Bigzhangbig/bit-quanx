@@ -19,6 +19,7 @@ const CONFIG = {
     signupListKey: "bit_sc_signup_list", // 待报名列表 Key
     notifyNoUpdateKey: "bit_sc_notify_no_update", // 无更新通知开关
     lastSignupKey: "bit_sc_last_signup", // 最后成功报名课程 Key (存为 JSON 对象 {id,title,time,user_id})
+    blacklistKey: "bit_sc_blacklist",
     
     // APIs
     applyUrl: "https://qcbldekt.bit.edu.cn/api/course/apply",
@@ -157,6 +158,11 @@ async function main() {
                     $.setdata(JSON.stringify(lastObj), CONFIG.lastSignupKey);
                     log(`📝 已记录最后成功报名: ${JSON.stringify(lastObj)}`);
                 } catch (e) { log(`记录最后报名失败: ${e}`); }
+                // 报名成功后自动加入黑名单，防止重复处理
+                try {
+                    const blMsg = addToBlacklist(courseId);
+                    log(`addToBlacklist: ${blMsg}`);
+                } catch (e) { log(`添加黑名单失败: ${e}`); }
                 
                 // 报名成功后，获取课程详情查看状态
                 await new Promise(r => setTimeout(r, 2000));
@@ -413,4 +419,37 @@ function Env(t, e) {
             this.isQuanX && $done(t)
         }
     }(t, e)
+}
+
+// 将课程ID添加到黑名单（局部实现，使用 CONFIG.blacklistKey）
+function addToBlacklist(courseId) {
+    try {
+        const blacklistStr = $.getdata(CONFIG.blacklistKey) || "";
+        let blacklist = [];
+        const trimmed = String(blacklistStr).trim();
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            try {
+                const arr = JSON.parse(trimmed);
+                if (Array.isArray(arr)) blacklist = arr.map(x => String(x).trim()).filter(Boolean);
+            } catch {
+                blacklist = trimmed.split(/[,，]/).map(id => id.trim()).filter(id => id);
+            }
+        } else {
+            blacklist = trimmed.split(/[,，]/).map(id => id.trim()).filter(id => id);
+        }
+
+        const courseIdStr = String(courseId).trim();
+        if (blacklist.includes(courseIdStr)) {
+            console.log(`[signup] 课程 ${courseIdStr} 已在黑名单中，无需重复添加`);
+            return "\n📝 已在黑名单中";
+        }
+
+        blacklist.push(courseIdStr);
+        $.setdata(blacklist.join(","), CONFIG.blacklistKey);
+        console.log(`[signup] 已将课程 ${courseIdStr} 添加到黑名单`);
+        return "\n📝 已自动添加到黑名单";
+    } catch (e) {
+        console.log(`[signup] 添加黑名单失败: ${e}`);
+        return "\n⚠️ 添加黑名单失败";
+    }
 }
