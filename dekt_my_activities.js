@@ -153,9 +153,27 @@ async function getMyCourseList(headers) {
                 if (Array.isArray(data.items)) items = data.items;
                 else if (Array.isArray(data.list)) items = data.list;
             }
-            CACHE.myCourseList = items;
-            CACHE.myCourseListFetchedAt = now;
-            console.log(`[myCourseList] 使用接口: ${usedUrl}，返回 ${items.length} 条`);
+            // 过滤掉已经过了签退/签到结束时间的课程，避免预拉取到已结束活动
+            try {
+                const beforeFilterCount = items.length;
+                const nowTs = Date.now();
+                items = items.filter(it => {
+                    // 优先使用签退结束时间，其次签到结束时间
+                    const endTimeStr = it.sign_out_end_time || it.sign_in_end_time || it.sign_out_end || it.sign_in_end_time;
+                    if (!endTimeStr) return true; // 没有结束时间则保留
+                    const parsed = new Date(String(endTimeStr).replace(/-/g, '/'));
+                    if (isNaN(parsed.getTime())) return true; // 无法解析则保留
+                    return parsed.getTime() >= nowTs; // 结束时间在现在之后则保留
+                });
+                CACHE.myCourseList = items;
+                CACHE.myCourseListFetchedAt = now;
+                console.log(`[myCourseList] 使用接口: ${usedUrl}，原始 ${beforeFilterCount} 条，过滤后 ${items.length} 条`);
+            } catch (e) {
+                // 过滤逻辑出错时兜底不影响主流程
+                CACHE.myCourseList = items;
+                CACHE.myCourseListFetchedAt = now;
+                console.log(`[myCourseList] 过滤失败，仍使用原始列表: ${JSON.stringify(e)}`);
+            }
             // 日志打印课程详情（即使为0条也打印接口与条数）
             items.forEach(item => {
                 const category = item.transcript_index ? item.transcript_index.transcript_name : (item.transcript_name || '未知');
