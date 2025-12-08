@@ -16,6 +16,7 @@ const CONFIG = {
     // BoxJS/Store Keys
     tokenKey: "bit_sc_token",
     headersKey: "bit_sc_headers",
+    userIdKey: "bit_sc_user_id", // 用户ID Key
     cacheKey: "bit_sc_cache", // 用来存上一次的最新课程ID
     debugKey: "bit_sc_debug", // 调试模式开关
     pickupKey: "bit_sc_pickup_mode", // 捡漏模式开关
@@ -27,7 +28,7 @@ const CONFIG = {
     filterTypeKey: "bit_sc_filter_type",
     filterAutoBlacklistCategoriesKey: "bit_sc_auto_blacklist_categories", // 自动报名栏目黑名单 Key
     unenrollCourseIdKey: "bit_sc_unenroll_course_id", // 取消报名课程ID Key (已弃用原 signupCourseIdKey)
-    lastSignupKey: "bit_sc_last_signup", // 最后成功报名课程 Key (存为 JSON 对象 {id,title,time})
+    lastSignupKey: "bit_sc_last_signup", // 最后成功报名课程 Key (存为 JSON 对象 {id,title,time,user_id})
     blacklistKey: "bit_sc_blacklist", // 黑名单 Key (逗号分隔)
     blacklistKeywordsKey: "bit_sc_blacklist_keywords", // 黑名单关键词 Key (逗号分隔)
     
@@ -60,6 +61,7 @@ const CONFIG = {
 async function checkCourses() {
     const token = $.getdata(CONFIG.tokenKey);
     const savedHeaders = $.getdata(CONFIG.headersKey);
+    const userId = $.getdata(CONFIG.userIdKey) || deriveUserId(token);
     const isDebug = $.getdata(CONFIG.debugKey) === "true";
     const isPickupMode = $.getdata(CONFIG.pickupKey) === "true";
     const isNotifyNoUpdate = $.getdata(CONFIG.notifyNoUpdateKey) === "true";
@@ -142,7 +144,7 @@ async function checkCourses() {
 
     // --- 新增：检查待报名列表 (仅 Debug 模式) ---
     if (isDebug) {
-        await checkSignupList(token, headers);
+        await checkSignupList(token, headers, userId);
     }
 
     if (isDebug) {
@@ -346,7 +348,7 @@ async function checkCourses() {
                                             signupResultMsg = `\n✅ 自动报名成功: ${signupRes.message}`;
                                             // 存储最后一次成功报名的课程（JSON 对象，便于与待报名列表保持一致）
                                             try {
-                                                const lastObj = { id: course.id, title: title, time: (new Date()).toISOString() };
+                                                const lastObj = { id: course.id, title: title, time: (new Date()).toISOString(), user_id: userId || null };
                                                 $.setdata(JSON.stringify(lastObj), CONFIG.lastSignupKey);
                                                 console.log(`[Monitor] 📝 已记录最后成功报名: ${JSON.stringify(lastObj)}`);
                                             } catch (e) { console.log(`[Monitor] 记录最后报名失败: ${e}`); }
@@ -495,7 +497,7 @@ async function autoSignup(courseId, token, headers) {
     }
 }
 
-async function checkSignupList(token, headers) {
+async function checkSignupList(token, headers, userId) {
     let listStr = $.getdata(CONFIG.signupListKey) || "[]";
     let list = [];
     try {
@@ -544,7 +546,7 @@ async function checkSignupList(token, headers) {
                 $.msg("✅ 自动报名成功", "", body);
                 // 存储最后一次成功报名的课程（JSON 对象）
                 try {
-                    const lastObj = { id: item.id, title: item.title || "", time: (new Date()).toISOString() };
+                    const lastObj = { id: item.id, title: item.title || "", time: (new Date()).toISOString(), user_id: userId || null };
                     $.setdata(JSON.stringify(lastObj), CONFIG.lastSignupKey);
                     console.log(`[CheckList] 📝 已记录最后成功报名: ${JSON.stringify(lastObj)}`);
                 } catch (e) { console.log(`[CheckList] 记录最后报名失败: ${e}`); }
@@ -642,6 +644,17 @@ async function getDurationByIdIfTime(courseId, headers) {
     } catch (e) {
         return null;
     }
+}
+
+function deriveUserId(authorizationHeader) {
+    try {
+        if (!authorizationHeader) return "";
+        // 支持 "Bearer 611156|xxxx" 或 "611156|xxxx"
+        let raw = String(authorizationHeader).trim();
+        if (raw.toLowerCase().startsWith("bearer ")) raw = raw.slice(7).trim();
+        const first = raw.split("|")[0].trim();
+        return /^\d+$/.test(first) ? first : "";
+    } catch (_) { return ""; }
 }
 
 // --- Env Polyfill ---
