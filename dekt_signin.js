@@ -81,7 +81,7 @@ async function main() {
                 if (coursesInWindow.length === 1) {
                     const only = coursesInWindow[0];
                     const body = `${only.id}|${only.column}|${only.title}\n处在${only.when}窗口：${only.timeRange}\n时长：${only.duration}`;
-                    notify($.name, `仅有一门课程在窗口`, body, { force: true });
+                    notify($.name, "仅有一门课程在窗口", body, { force: true });
                 }
             } catch (e) {}
         }
@@ -466,7 +466,7 @@ function getRandomCoordinate(lat, lon, rangeMeters) {
     // 1度经度 ≈ 111km * cos(lat)
     
     // 稍微缩小一点范围，确保在圈内
-    const safeRange = rangeMeters * 0.6; 
+    const safeRange = rangeMeters * 0.8; 
     
     const r = safeRange / 111000; // 转换为度数的大致半径
     const u = Math.random();
@@ -584,7 +584,6 @@ function Env(t, e) {
     }(t, e)
 }
 
-// 新增：根据课程详情与当前时间判断可签类型（默认优先签退）
 function decideSignType(info, statusHint) {
     const now = new Date();
     let canSign = false;

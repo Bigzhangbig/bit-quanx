@@ -26,6 +26,9 @@
 const HOST = "https://qcbldekt.bit.edu.cn";
 const $ = new Env("第二课堂取消报名");
 console.log("[unenroll] 脚本启动");
+// 调试开关：BoxJS 中设置 `bit_sc_debug=true` 或环境 `DEKT_DEBUG=true` 可开启详细调试日志
+const DEBUG = String($.getdata('bit_sc_debug') || $.getdata('DEKT_DEBUG') || 'false').toLowerCase() === 'true';
+function debugLog(...args) { if (DEBUG) console.log(...args); }
 const KEY_COURSE_IDS = ["bit_sc_unenroll_course_id", "dekt_unenroll_course_id", "dekt_course_id", "DEKT_COURSE_ID"];
 const KEY_LAST_SIGNUP = "bit_sc_last_signup"; // 最后成功报名课程 Key (JSON 对象)
 const KEY_HEADERS = ["bit_sc_headers", "dekt_headers", "DEKT_HEADERS"];
@@ -39,8 +42,11 @@ main();
 
 async function main() {
   try {
-    // 优先读取用户指定的课程ID，若为空则使用最后成功报名的课程ID
-    let courseId = getFirstPref(KEY_COURSE_IDS);
+    // 优先读取用户指定的课程ID（记录使用的 BoxJS 变量名），若为空则使用最后成功报名的课程ID
+    const coursePref = getFirstPrefWithKey(KEY_COURSE_IDS);
+    let courseId = coursePref.value;
+    const coursePrefKey = coursePref.key;
+    if (coursePrefKey) console.log(`[unenroll] 使用 BoxJS 变量: ${coursePrefKey}`);
     let courseTitle = "";
     let isUsingLastSignup = false;
     
@@ -80,6 +86,14 @@ async function main() {
       console.log(`[unenroll] 终止：${err}`);
       return done(err);
     }
+    // 强校验：取消报名必须提供课程 ID（纯数字），禁止模糊匹配或填写课程名称
+    if (courseId && !/^\d+$/.test(String(courseId).trim())) {
+      const keysHint = KEY_COURSE_IDS.join(" / ");
+      const err = `课程 ID 必须为数字，请不要使用课程名称或模糊匹配。请在 BoxJS 填写上述变量之一（例如：${keysHint}）并填入课程 ID`;
+      notify("第二课堂取消报名", `课程ID: ${courseId}`, err);
+      console.log(`[unenroll] 终止：${err}`);
+      return done(err);
+    }
     const result = await tryCancel(courseId, userId, headers);
     const subTitle = courseTitle ? `课程: ${courseTitle} (ID: ${courseId})` : `课程ID: ${courseId}`;
     if (result.ok) {
@@ -90,9 +104,73 @@ async function main() {
       console.log(`[unenroll] 成功: path=${result.path} status=${result.status}`);
       return done();
     } else {
+      // 若接口返回 "报名记录不存在"，尝试修复 user_id 或先报名再重试取消
       const parsed = tryParseJSON(result.body) || {};
       const detail = parsed.message || parsed.msg || (typeof result.body === 'string' ? result.body.slice(0, 200) : "");
       const hint = (result.status === 401 || result.code === 401) ? "(Token 失效，请重新获取)" : "";
+
+      if (String(detail).includes('报名记录不存在') || String(detail).includes('未找到报名')) {
+        console.log('[unenroll] 检测到报名记录不存在，尝试获取正确的 user_id 或先报名再重试取消');
+
+        // 1) 尝试从 /api/user/info 获取 user_id
+        try {
+          const newUserId = await getUserIdFromApi(headers);
+          if (newUserId && newUserId !== String(userId)) {
+            console.log(`[unenroll] 从 /api/user/info 获取到 user_id=${newUserId}，将重试取消报名`);
+            const retry = await tryCancel(courseId, newUserId, headers);
+            if (isSuccess(retry)) {
+              const blacklistMsg2 = addToBlacklist(courseId);
+              notify('第二课堂取消报名', subTitle, `已取消报名（${CANCEL_PATH}）${blacklistMsg2}`);
+              console.log(`[unenroll] 重试成功: status=${retry.status}`);
+              return done();
+            }
+            console.log(`[unenroll] 使用新 user_id 重试仍失败: ${String(retry.body).slice(0,200)}`);
+          }
+        } catch (e) {
+          console.log(`[unenroll] 获取 user_id 失败: ${e}`);
+        }
+
+        // 2) 若仍未报名，尝试调用报名逻辑（复用 dekt_signup.js autoSignup）再重试取消
+        try {
+          let signupModule = null;
+          try { signupModule = require('./dekt_signup.js'); } catch (e) { signupModule = null; }
+          if (signupModule && typeof signupModule.autoSignup === 'function') {
+            console.log('[unenroll] 调用 dekt_signup.autoSignup 进行报名');
+            const sres = await signupModule.autoSignup(courseId, headers);
+            console.log(`[unenroll] 报名返回: ${JSON.stringify(sres).slice(0,200)}`);
+            // 报名后可选地拉取我的课程列表以确认报名条目（仅在 DEBUG 模式下执行，避免常规运行产生额外请求）
+            if (DEBUG) {
+              try {
+                const myTransList = await httpGet(`${HOST}/api/transcript/course/signIn/list?page=1&limit=200&type=1`, headers);
+                debugLog('[unenroll] transcript/signIn/list 返回：', String(myTransList.body).slice(0,1000));
+              } catch (e) { debugLog('[unenroll] 拉取 transcript 列表异常:', e); }
+              try {
+                const myCourseList = await httpGet(`${HOST}/api/course/list/my?page=1&limit=200`, headers);
+                debugLog('[unenroll] course/list/my 返回：', String(myCourseList.body).slice(0,1000));
+              } catch (e) { debugLog('[unenroll] 拉取 course/list/my 异常:', e); }
+            }
+            if (sres && sres.success) {
+              // 报名成功后稍等并重试取消
+              await new Promise(r => setTimeout(r, 2000));
+              const retry2 = await tryCancel(courseId, userId, headers);
+              if (isSuccess(retry2)) {
+                const blacklistMsg3 = addToBlacklist(courseId);
+                notify('第二课堂取消报名', subTitle, `已取消报名（${CANCEL_PATH}）${blacklistMsg3}`);
+                console.log(`[unenroll] 报名后重试取消成功: status=${retry2.status}`);
+                return done();
+              }
+              console.log(`[unenroll] 报名后重试取消仍失败: ${String(retry2.body).slice(0,200)}`);
+            } else {
+              console.log('[unenroll] 自动报名失败或返回非成功，放弃自动报名重试');
+            }
+          } else {
+            console.log('[unenroll] 未找到 dekt_signup.autoSignup，无法自动报名重试');
+          }
+        } catch (e) {
+          console.log(`[unenroll] 自动报名并重试发生异常: ${e}`);
+        }
+      }
+
       const msg = `取消失败：HTTP ${result.status || "未知"} ${detail} ${hint} [${result.path || "未知接口"}]`;
       notify("第二课堂取消报名", subTitle, msg);
       console.log(`[unenroll] 失败: ${msg}`);
@@ -119,6 +197,23 @@ function getFirstPref(keys) {
     if (v) return v.trim();
   }
   return "";
+}
+
+// 返回第一个存在的偏好值以及所使用的 BoxJS 键名
+function getFirstPrefWithKey(keys) {
+  for (const k of keys) {
+    const v = $.getdata(k);
+    console.log(`[pref] key=${k} value=${v ? '(set)' : '(empty)'}`);
+    if (v) return { key: k, value: String(v).trim() };
+  }
+  // 兼容额外可能键名
+  const extraKeys = ["course_id", "bit_sc_course_id", "DEKT_COURSEID"];
+  for (const k of extraKeys) {
+    const v = $.getdata(k);
+    console.log(`[pref] fallback key=${k} value=${v ? '(set)' : '(empty)'}`);
+    if (v) return { key: k, value: String(v).trim() };
+  }
+  return { key: "", value: "" };
 }
 
 function tryParseJSON(s) {
@@ -170,16 +265,63 @@ function isSuccess(resp) {
 }
 
 function httpPost(url, headers, body) {
+  const sh = sanitizeHeaders(headers);
+  debugLog(`[httpPostDebug] POST ${url} headers=${JSON.stringify(sh)} body=${String(body).slice(0,400)}`);
   return new Promise((resolve) => {
     $.post({ url, headers, body }, (err, resp, data) => {
       if (err) {
+        debugLog(`[httpPostDebug] ERROR ${url} err=${err}`);
         resolve({ err });
         return;
       }
       const status = resp && (resp.statusCode ?? resp.status);
+      debugLog(`[httpPostDebug] RESP ${url} status=${status} body=${String(data).slice(0,800)}`);
       resolve({ status, headers: resp?.headers, body: data });
     });
   });
+}
+
+function httpGet(url, headers) {
+  const sh = sanitizeHeaders(headers);
+  // 移除 Content-Length 以免对 GET 请求造成问题
+  const headersForGet = Object.assign({}, headers || {});
+  if (headersForGet['Content-Length']) delete headersForGet['Content-Length'];
+  if (headersForGet['content-length']) delete headersForGet['content-length'];
+  debugLog(`[httpGetDebug] GET ${url} headers=${JSON.stringify(sanitizeHeaders(headersForGet))}`);
+  return new Promise((resolve) => {
+    $.get({ url, headers: headersForGet }, (err, resp, data) => {
+      if (err) { debugLog(`[httpGetDebug] ERROR ${url} err=${err}`); resolve({ err }); return; }
+      const status = resp && (resp.statusCode ?? resp.status);
+      debugLog(`[httpGetDebug] RESP ${url} status=${status} body=${String(data).slice(0,800)}`);
+      resolve({ status, headers: resp?.headers, body: data });
+    });
+  });
+}
+
+async function getUserIdFromApi(headers) {
+  try {
+    const r = await httpGet(`${HOST}/api/user/info`, headers);
+    debugLog('[unenroll-debug] /api/user/info raw response:', typeof r === 'object' ? (r.body ? String(r.body).slice(0,800) : JSON.stringify(r)) : String(r));
+    if (r && r.status >= 200 && r.status < 300 && !r.err) {
+      const data = tryParseJSON(r.body) || {};
+      debugLog('[unenroll-debug] /api/user/info parsed:', data);
+      if (data && (data.data && data.data.id)) return String(data.data.id);
+      if (data && data.id) return String(data.id);
+    }
+  } catch (e) {
+    console.log(`[unenroll] getUserIdFromApi 异常: ${e}`);
+  }
+  return '';
+}
+
+function sanitizeHeaders(h) {
+  try {
+    const copy = Object.assign({}, h || {});
+    if (copy.Authorization) copy.Authorization = 'Bearer *';
+    if (copy.authorization) copy.authorization = 'Bearer *';
+    if (copy.Token) copy.Token = '***';
+    return copy;
+  } catch (e) { return {} }
 }
 
 function notify(title, sub, body) {

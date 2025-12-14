@@ -9,7 +9,18 @@
 
 const EnvCtor = (typeof global !== 'undefined' && global.Env) ? global.Env : Env;
 const $ = new EnvCtor("北理工第二课堂-我的活动");
-console.log("脚本开始运行");
+
+// 统一时间戳日志工具
+function _nowTs() {
+    const d = new Date();
+    const pad = (n, w = 2) => String(n).padStart(w, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+}
+function log(...args) {
+    console.log(...args);
+}
+
+log("脚本开始运行");
 
 const CONFIG = {
     tokenKey: "bit_sc_token",
@@ -38,15 +49,18 @@ const CACHE = {
     // legacyCheckInFailed 已移除
 };
 
-(async () => {
-    try {
-        await checkActivities();
-    } catch (e) {
-        console.log(e);
-    } finally {
-        $.done();
-    }
-})();
+// 仅在作为主模块直接运行时自动执行，避免被 require 时重复执行（如 local 调试脚本）
+if (typeof module === 'undefined' || require.main === module) {
+    (async () => {
+        try {
+            await checkActivities();
+        } catch (e) {
+            log(e);
+        } finally {
+            $.done();
+        }
+    })();
+}
 
 async function checkActivities() {
     const token = $.getdata(CONFIG.tokenKey);
@@ -65,48 +79,86 @@ async function checkActivities() {
 
     try {
         if (isDebug) {
-            console.log("[DEBUG] 调试模式已开启：将抑制通知，仅输出日志。");
+            log("[DEBUG] 调试模式已开启：将抑制通知，仅输出日志。");
         }
 
-        // 先拉取一次“我的课程列表”，以确保详细日志能稳定打印（函数内带缓存）
+        // 若缓存为空或过期，则在后台并行预拉取“我的课程列表”，不阻塞主列表请求
         try {
-            const list = await getMyCourseList(headers);
-            if (Array.isArray(list)) {
-                console.log(`[myCourseList] 预拉取完成，条数: ${list.length}`);
+            if (!CACHE.myCourseList || (Date.now() - CACHE.myCourseListFetchedAt >= 5 * 60 * 1000)) {
+                log('[myCourseList] 后台预拉取（不阻塞主流程）...');
+                getMyCourseList(headers).then(list => {
+                    if (Array.isArray(list)) {
+                        log(`[myCourseList] 后台预拉取完成，条数: ${list.length}`);
+                    } else {
+                        log('[myCourseList] 后台预拉取完成（非数组）');
+                    }
+                }).catch(e => {
+                    log('[myCourseList] 后台预拉取失败: ' + e);
+                });
+            } else {
+                log('[myCourseList] 缓存命中，跳过后台预拉取');
             }
         } catch (e) {
-            console.log("预拉取我的课程列表用于日志打印失败: " + e);
+            log("准备后台预拉取失败: " + e);
         }
 
         const res = await httpGet(CONFIG.listUrl, headers);
         if (res.code === 200 && res.data && res.data.items) {
             return await processItems(res.data.items, headers);
         } else {
-            console.log("获取列表失败或列表为空: " + JSON.stringify(res));
+            log("获取列表失败或列表为空: " + JSON.stringify(res));
         }
     } catch (error) {
-        console.log("请求失败: " + error);
+        log("请求失败: " + error);
         notify($.name, "请求失败", error);
     }
 }
 
-function httpGet(url, headers) {
+function httpGet(url, headers, timeout = 10000) {
+    // 将默认超时从 20s 降到 10s，并默认不再自动重试以减少感知延迟
+    return httpGetWithRetry(url, headers, timeout, 0);
+}
+
+function httpGetWithRetry(url, headers, timeout, retries) {
     return new Promise((resolve, reject) => {
-        $.get({ url, headers }, (err, resp, data) => {
-            if (err) {
-                reject(err);
-            } else {
-                if (resp.status === 401 || resp.statusCode === 401) {
-                    resolve({ code: 401, message: "Unauthenticated." });
-                    return;
-                }
+        const opts = { url, headers, timeout };
+
+        // 心跳日志：在等待响应或重试期间每秒输出一次，便于诊断网络/阻塞感知
+        const startTs = Date.now();
+        let hb = setInterval(() => {
+            const secs = Math.floor((Date.now() - startTs) / 1000);
+            try { log(`[httpGet] hb ${secs}s`); } catch (e) {}
+        }, 1000);
+        const clearHb = () => { if (hb) { clearInterval(hb); hb = null; } };
+
+        const attempt = (remaining) => {
+            $.get(opts, (err, resp, data) => {
                 try {
-                    resolve(JSON.parse(data));
-                } catch (e) {
-                    reject("JSON解析失败");
+                    if (err) {
+                        if (remaining > 0) {
+                            log(`[httpGet] 请求错误，重试中（剩余 ${remaining} 次）： ${err}`);
+                            setTimeout(() => attempt(remaining - 1), 1000);
+                            return;
+                        }
+                        reject(err);
+                    } else {
+                        if (resp.status === 401 || resp.statusCode === 401) {
+                            resolve({ code: 401, message: "Unauthenticated." });
+                            return;
+                        }
+                        try {
+                            resolve(JSON.parse(data));
+                        } catch (e) {
+                            reject("JSON解析失败");
+                        }
+                    }
+                } finally {
+                    clearHb();
                 }
-            }
-        });
+            });
+        };
+
+        attempt(retries);
     });
 }
 
@@ -137,31 +189,49 @@ async function getMyCourseList(headers) {
                 if (Array.isArray(data.items)) items = data.items;
                 else if (Array.isArray(data.list)) items = data.list;
             }
-            CACHE.myCourseList = items;
-            CACHE.myCourseListFetchedAt = now;
-            console.log(`[myCourseList] 使用接口: ${usedUrl}，返回 ${items.length} 条`);
+            // 过滤掉已经过了签退/签到结束时间的课程，避免预拉取到已结束活动
+            try {
+                const beforeFilterCount = items.length;
+                const nowTs = Date.now();
+                items = items.filter(it => {
+                    // 优先使用签退结束时间，其次签到结束时间
+                    const endTimeStr = it.sign_out_end_time || it.sign_in_end_time;
+                    if (!endTimeStr) return true; // 没有结束时间则保留
+                    const parsed = new Date(String(endTimeStr).replace(/-/g, '/'));
+                    if (isNaN(parsed.getTime())) return true; // 无法解析则保留
+                    return parsed.getTime() >= nowTs; // 结束时间在现在之后则保留
+                });
+                CACHE.myCourseList = items;
+                CACHE.myCourseListFetchedAt = now;
+                log(`[myCourseList] 使用接口: ${usedUrl}，原始 ${beforeFilterCount} 条，过滤后 ${items.length} 条`);
+            } catch (e) {
+                // 过滤逻辑出错时兜底不影响主流程
+                CACHE.myCourseList = items;
+                CACHE.myCourseListFetchedAt = now;
+                log(`[myCourseList] 过滤失败，仍使用原始列表: ${JSON.stringify(e)}`);
+            }
             // 日志打印课程详情（即使为0条也打印接口与条数）
             items.forEach(item => {
                 const category = item.transcript_index ? item.transcript_index.transcript_name : (item.transcript_name || '未知');
                 const status = item.status_label || item.status;
                 const address = item.sign_in_address && Array.isArray(item.sign_in_address) ? item.sign_in_address.map(a => a.address).join(';') : (item.time_place || '未知');
-                let log = `课程ID: ${item.id || item.course_id}, 类别: ${category}, 名称: ${item.title || item.course_title}, 状态: ${status}, 地址: ${address}`;
+                let lineStr = `课程ID: ${item.id || item.course_id}, 类别: ${category}, 名称: ${item.title || item.course_title}, 状态: ${status}, 地址: ${address}`;
                 if (item.completion_flag_text) {
-                    log += `, completion_flag_text: ${item.completion_flag_text}`;
+                    lineStr += `, completion_flag_text: ${item.completion_flag_text}`;
                 }
                 // 判断 time 类型的若干可见字段
                 if ((item.completion_flag && String(item.completion_flag).toLowerCase() === 'time') || item.duration != null || (item.transcript_index_type && item.transcript_index_type.duration != null)) {
                     const duration = item.duration || (item.transcript_index_type && item.transcript_index_type.duration) || (item.completion_flag_text ? item.completion_flag_text : '未知');
-                    log += `, 时长: ${duration}, 签到: ${item.sign_in_start_time || '无'}-${item.sign_in_end_time || '无'}, 签退: ${item.sign_out_start_time || '无'}-${item.sign_out_end_time || '无'}`;
+                    lineStr += `, 时长: ${duration}, 签到: ${item.sign_in_start_time || '无'}-${item.sign_in_end_time || '无'}, 签退: ${item.sign_out_start_time || '无'}-${item.sign_out_end_time || '无'}`;
                 }
-                console.log(log);
+                log(lineStr);
             });
             return CACHE.myCourseList;
         } else {
-            console.log(`[myCourseList] 接口返回非200或结构异常: ${JSON.stringify(data)}`);
+            log(`[myCourseList] 接口返回非200或结构异常: ${JSON.stringify(data)}`);
         }
     } catch (e) {
-        console.log(`获取我的课程列表失败: ${e}`);
+        log(`获取我的课程列表失败: ${e}`);
     }
     return [];
 }
@@ -182,12 +252,12 @@ async function getCourseInfo(courseId, headers) {
             if (result.duration != null) {
                 result._source.duration = 'rest.duration';
             }
-            console.log(`[courseInfo] 使用 REST 接口获取成功: id=${courseId}`);
+            log(`[courseInfo] 使用 REST 接口获取成功: id=${courseId}`);
         } else {
-            console.log(`[courseInfo] REST 接口返回异常: id=${courseId}`);
+            log(`[courseInfo] REST 接口返回异常: id=${courseId}`);
         }
     } catch (e) {
-        console.log(`[courseInfo] REST 接口请求异常: ${e}`);
+        log(`[courseInfo] REST 接口请求异常: ${e}`);
     }
 
     // 2) 兜底：我的课程列表（仅在前面无 duration 时）
@@ -207,10 +277,10 @@ async function getCourseInfo(courseId, headers) {
                 if (result.transcript_name == null && found.transcript_name != null) {
                     result.transcript_name = found.transcript_name;
                 }
-                console.log(`[duration] 兜底使用 myCourseList: id=${courseId}`);
+                log(`[duration] 兜底使用 myCourseList: id=${courseId}`);
             }
         } catch (e) {
-            console.log(`从我的课程列表兜底获取时长失败: ${e}`);
+            log(`从我的课程列表兜底获取时长失败: ${e}`);
         }
     }
 
@@ -228,7 +298,7 @@ async function getCourseInfo(courseId, headers) {
                 }
             }
         } catch (e) {
-            console.log(`从元数据提取时长失败: ${e}`);
+            log(`从元数据提取时长失败: ${e}`);
         }
     }
 
@@ -238,93 +308,130 @@ async function getCourseInfo(courseId, headers) {
 async function processItems(items, headers) {
     const now = new Date();
     let notifyItems = [];
-
+    // 收集需要处理的任务（过滤并去重），再并发拉取详情（并发上限）
+    const tasks = [];
     for (const item of items) {
-        // status_label: "待签到", "待签退", "进行中" 等
-        // status: 0 (待签到), 1 (待签退), 2 (补卡), 3 (已结束)
-        // 抓包示例: status:0 -> 待签到, status:1 -> 待签退
-
         // 去除已取消的课程（精确匹配 '已取消' 或 status 为 4）
-        if (item.status_label && String(item.status_label).trim() === "已取消") {
-            continue;
-        }
-        if (typeof item.status !== 'undefined' && (item.status === 4 || item.status === '4')) {
-            continue;
-        }
+        if (item.status_label && String(item.status_label).trim() === "已取消") continue;
+        if (typeof item.status !== 'undefined' && (item.status === 4 || item.status === '4')) continue;
 
         const isSignIn = item.status_label && String(item.status_label).trim() === "待签到";
         const isSignOut = item.status_label && String(item.status_label).trim() === "待签退";
+        if (!(isSignIn || isSignOut)) continue;
 
-        if (isSignIn || isSignOut) {
-            const endTimeStr = isSignIn ? item.sign_in_end_time : item.sign_out_end_time;
+        const endTimeStr = isSignIn ? item.sign_in_end_time : item.sign_out_end_time;
+        if (!endTimeStr) continue;
+        const endTime = new Date(endTimeStr.replace(/-/g, '/'));
+        if (isNaN(endTime.getTime())) continue;
+        if (now >= endTime) continue; // 已经过期
 
-            if (endTimeStr) {
-                const endTime = new Date(endTimeStr.replace(/-/g, '/')); // 兼容性替换
+        tasks.push({ item, isSignIn });
+    }
 
-                // 如果当前时间在结束时间之前
-                if (now < endTime) {
-                    // 获取详细信息：时间段 + 时长 + 分类
-                    const info = await getCourseInfo(item.course_id, headers);
-                    const signInStart = info ? info.sign_in_start_time : item.sign_in_start_time;
-                    const signInEnd = info ? info.sign_in_end_time : item.sign_in_end_time;
-                    const signOutStart = info ? info.sign_out_start_time : item.sign_out_start_time;
-                    const signOutEnd = info ? info.sign_out_end_time : item.sign_out_end_time;
+    if (tasks.length === 0) {
+        log("没有需要签到/签退的活动");
+        return [];
+    }
 
-                    // 获取分类名称：优先 transcript_index_id，其次 transcript_name（或 transcript_index.transcript_name）
-                    let category = null;
-                    const catId = (info && info.transcript_index_id) || item.transcript_index_id;
-                    if (catId != null) {
-                        category = CONFIG.categories.find(c => String(c.id) === String(catId));
-                    } else if (info && info.transcript_name) {
-                        category = CONFIG.categories.find(c => c.name === info.transcript_name);
-                    } else if (info && info.transcript_index && info.transcript_index.transcript_name) {
-                        category = CONFIG.categories.find(c => c.name === info.transcript_index.transcript_name);
-                    }
+    log(`开始并发拉取 ${tasks.length} 个课程详情（并发上限 5）`);
 
-                    const categoryName = category ? category.name : (info && info.transcript_name) || (info && info.transcript_index && info.transcript_index.transcript_name) || "未知分类";
-                    // 优先 info.duration；其次从 my list/item；最后 transcript_index_type.duration 或 completion_flag_text
-                    let duration = null;
-                    if (info && info.duration != null) duration = info.duration;
-                    else if (item && item.duration != null) duration = item.duration;
-                    else if (info && info.transcript_index_type && info.transcript_index_type.duration != null) duration = info.transcript_index_type.duration;
-                    else if (info && info.completion_flag_text) {
-                        const m = String(info.completion_flag_text).match(/(\d{1,3})\s*分钟/);
-                        if (m) duration = parseInt(m[1], 10);
-                    }
-                    const durationSource = (info && info._source && info._source.duration) || (item && item.duration != null ? 'signInList.duration' : null) || 'unknown';
-
-                    notifyItems.push({
-                        title: item.course_title,
-                        action: isSignIn ? "签到" : "签退",
-                        deadline: endTimeStr,
-                        id: item.course_id,
-                        signInStart: signInStart,
-                        signInEnd: signInEnd,
-                        signOutStart: signOutStart,
-                        signOutEnd: signOutEnd,
-                        category: categoryName,
-                        statusLabel: item.status_label,
-                        duration: duration,
-                        durationSource: durationSource
-                    });
+    // 并发映射工具（并发上限）
+    async function mapWithConcurrencyLimit(inputs, mapper, limit = 5) {
+        const results = [];
+        const executing = new Set();
+        for (const input of inputs) {
+            const p = (async () => {
+                try {
+                    return await mapper(input);
+                } finally {
+                    executing.delete(p);
                 }
+            })();
+            results.push(p);
+            executing.add(p);
+            if (executing.size >= limit) {
+                await Promise.race(executing);
             }
         }
+        return Promise.all(results);
     }
+
+    // mapper: 拉取单个课程的完整 notifyItem（或 null）
+    const mapper = async (task) => {
+        const item = task.item;
+        const isSignIn = task.isSignIn;
+        const id = item.course_id;
+        log(`[courseInfo] 开始拉取详情 id=${id} 标题=${item.course_title}`);
+        const start = Date.now();
+        let info = null;
+        try {
+            info = await getCourseInfo(id, headers);
+        } catch (e) {
+            log(`[courseInfo] 拉取异常 id=${id}: ${e}`);
+            return null;
+        }
+        const dur = Date.now() - start;
+        log(`[courseInfo] 完成 id=${id} 耗时 ${dur} ms`);
+
+        const signInStart = info ? info.sign_in_start_time : item.sign_in_start_time;
+        const signInEnd = info ? info.sign_in_end_time : item.sign_in_end_time;
+        const signOutStart = info ? info.sign_out_start_time : item.sign_out_start_time;
+        const signOutEnd = info ? info.sign_out_end_time : item.sign_out_end_time;
+
+        let category = null;
+        const catId = (info && info.transcript_index_id) || item.transcript_index_id;
+        if (catId != null) {
+            category = CONFIG.categories.find(c => String(c.id) === String(catId));
+        } else if (info && info.transcript_name) {
+            category = CONFIG.categories.find(c => c.name === info.transcript_name);
+        } else if (info && info.transcript_index && info.transcript_index.transcript_name) {
+            category = CONFIG.categories.find(c => c.name === info.transcript_index.transcript_name);
+        }
+        const categoryName = category ? category.name : (info && info.transcript_name) || (info && info.transcript_index && info.transcript_index.transcript_name) || "未知分类";
+
+        let duration = null;
+        if (info && info.duration != null) duration = info.duration;
+        else if (item && item.duration != null) duration = item.duration;
+        else if (info && info.transcript_index_type && info.transcript_index_type.duration != null) duration = info.transcript_index_type.duration;
+        else if (info && info.completion_flag_text) {
+            const m = String(info.completion_flag_text).match(/(\d{1,3})\s*分钟/);
+            if (m) duration = parseInt(m[1], 10);
+        }
+        const durationSource = (info && info._source && info._source.duration) || (item && item.duration != null ? 'signInList.duration' : null) || 'unknown';
+
+        return {
+            title: item.course_title,
+            action: isSignIn ? "签到" : "签退",
+            deadline: isSignIn ? item.sign_in_end_time : item.sign_out_end_time,
+            id: id,
+            signInStart: signInStart,
+            signInEnd: signInEnd,
+            signOutStart: signOutStart,
+            signOutEnd: signOutEnd,
+            category: categoryName,
+            statusLabel: item.status_label,
+            duration: duration,
+            durationSource: durationSource
+        };
+    };
+
+    const results = await mapWithConcurrencyLimit(tasks, mapper, 5);
+    // 过滤掉 null
+    notifyItems = results.filter(x => x != null);
 
     if (notifyItems.length > 0) {
         // 按截止时间排序，优先处理最早截止的
         notifyItems.sort((a, b) => new Date(a.deadline.replace(/-/g, '/')) - new Date(b.deadline.replace(/-/g, '/')));
 
         // 打印所有待参加活动的签到时间段和签退时间段
-        console.log("待参加活动列表详情:");
+        log("待参加活动列表详情:");
         notifyItems.forEach(item => {
-            console.log(`【${item.category} | ${item.statusLabel}】[${item.id}] [${item.action}] ${item.title}`);
-            console.log(`  签到时间: ${item.signInStart || '未设置'} - ${item.signInEnd || '未设置'}`);
-            console.log(`  签退时间: ${item.signOutStart || '未设置'} - ${item.signOutEnd || '未设置'}`);
+            log(`【${item.category} | ${item.statusLabel}】[${item.id}] [${item.action}] ${item.title}`);
+            log(`  签到时间: ${item.signInStart || '未设置'} - ${item.signInEnd || '未设置'}`);
+            log(`  签退时间: ${item.signOutStart || '未设置'} - ${item.signOutEnd || '未设置'}`);
             let ds = '';
             if (item.duration == null) {
-                console.log('  时长: 未知');
+                log('  时长: 未知');
                 return;
             }
             // rest.duration 不显示来源；其它来源简化标签
@@ -347,7 +454,7 @@ async function processItems(items, headers) {
                 default:
                     ds = '';
             }
-            console.log(`  时长: ${item.duration}${ds}`);
+            log(`  时长: ${item.duration}${ds}`);
         });
 
         // 1. 处理第一个（最紧急）活动
@@ -367,7 +474,7 @@ async function processItems(items, headers) {
             msgBody,
             {"open-url": quickChartUrl}
         );
-        console.log(`已通知: [${firstItem.id}] ${firstItem.title} ${firstItem.action}`);
+        log(`已通知: [${firstItem.id}] ${firstItem.title} ${firstItem.action}`);
 
         // 2. 其余活动简写为一条通知
         if (notifyItems.length > 1) {
@@ -380,10 +487,10 @@ async function processItems(items, headers) {
                 summary + "\n点击跳转小程序",
                 {"open-url": "weixin://dl/business/?t=34E4TP288tr"}
             );
-            console.log(`已通知其余 ${restItems.length} 个活动`);
+            log(`已通知其余 ${restItems.length} 个活动`);
         }
     } else {
-        console.log("没有需要签到/签退的活动");
+        log("没有需要签到/签退的活动");
     }
 
     return notifyItems;
@@ -396,7 +503,7 @@ function Env(t, e) { class s { constructor(t) { this.env = t } } return new clas
 function notify(title, subtitle = "", body = "", options) {
     const isDebug = String($.getdata(CONFIG.debugKey) || "false").toLowerCase() === "true";
     if (isDebug) {
-        console.log(`[DEBUG] 抑制通知 -> ${title} | ${subtitle} | ${body && body.substring(0, 80)}`);
+        log(`[DEBUG] 抑制通知 -> ${title} | ${subtitle} | ${body && body.substring(0, 80)}`);
         return;
     }
     $.msg(title, subtitle, body, options);

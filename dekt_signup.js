@@ -15,9 +15,11 @@ const CONFIG = {
     // BoxJS Keys
     tokenKey: "bit_sc_token",
     headersKey: "bit_sc_headers",
+    userIdKey: "bit_sc_user_id", // 用户ID Key
     signupListKey: "bit_sc_signup_list", // 待报名列表 Key
     notifyNoUpdateKey: "bit_sc_notify_no_update", // 无更新通知开关
-    lastSignupKey: "bit_sc_last_signup", // 最后成功报名课程 Key (存为 JSON 对象 {id,title,time})
+    lastSignupKey: "bit_sc_last_signup", // 最后成功报名课程 Key (存为 JSON 对象 {id,title,time,user_id})
+    blacklistKey: "bit_sc_blacklist",
     
     // APIs
     applyUrl: "https://qcbldekt.bit.edu.cn/api/course/apply",
@@ -42,6 +44,7 @@ function log(msg) { console.log(`${LOG_PREFIX} ${msg}`); }
 async function main() {
     const token = $.getdata(CONFIG.tokenKey);
     const savedHeaders = $.getdata(CONFIG.headersKey);
+    const userId = $.getdata(CONFIG.userIdKey) || deriveUserId(token);
     const isNotifyNoUpdate = $.getdata(CONFIG.notifyNoUpdateKey) === "true";
     let hasNotified = false;
     
@@ -151,10 +154,15 @@ async function main() {
                 
                 // 存储最后一次成功报名的课程（JSON 对象）
                 try {
-                    const lastObj = { id: courseId, title: title, time: (new Date()).toISOString() };
+                    const lastObj = { id: courseId, title: title, time: (new Date()).toISOString(), user_id: userId || null };
                     $.setdata(JSON.stringify(lastObj), CONFIG.lastSignupKey);
                     log(`📝 已记录最后成功报名: ${JSON.stringify(lastObj)}`);
                 } catch (e) { log(`记录最后报名失败: ${e}`); }
+                // 报名成功后自动加入黑名单，防止重复处理
+                try {
+                    const blMsg = addToBlacklist(courseId);
+                    log(`addToBlacklist: ${blMsg}`);
+                } catch (e) { log(`添加黑名单失败: ${e}`); }
                 
                 // 报名成功后，获取课程详情查看状态
                 await new Promise(r => setTimeout(r, 2000));
@@ -335,6 +343,17 @@ function computeCourseInfoMessage(courseInfo, title, courseId) {
     return { statusMsg: statusLabel, subMsg };
 }
 
+function deriveUserId(authorizationHeader) {
+    try {
+        if (!authorizationHeader) return "";
+        // 支持 "Bearer 611156|xxxx" 或 "611156|xxxx"
+        let raw = String(authorizationHeader).trim();
+        if (raw.toLowerCase().startsWith("bearer ")) raw = raw.slice(7).trim();
+        const first = raw.split("|")[0].trim();
+        return /^\d+$/.test(first) ? first : "";
+    } catch (_) { return ""; }
+}
+
 // Env Polyfill
 function Env(t, e) {
     class s {
@@ -400,4 +419,37 @@ function Env(t, e) {
             this.isQuanX && $done(t)
         }
     }(t, e)
+}
+
+// 将课程ID添加到黑名单（局部实现，使用 CONFIG.blacklistKey）
+function addToBlacklist(courseId) {
+    try {
+        const blacklistStr = $.getdata(CONFIG.blacklistKey) || "";
+        let blacklist = [];
+        const trimmed = String(blacklistStr).trim();
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            try {
+                const arr = JSON.parse(trimmed);
+                if (Array.isArray(arr)) blacklist = arr.map(x => String(x).trim()).filter(Boolean);
+            } catch {
+                blacklist = trimmed.split(/[,，]/).map(id => id.trim()).filter(id => id);
+            }
+        } else {
+            blacklist = trimmed.split(/[,，]/).map(id => id.trim()).filter(id => id);
+        }
+
+        const courseIdStr = String(courseId).trim();
+        if (blacklist.includes(courseIdStr)) {
+            console.log(`[signup] 课程 ${courseIdStr} 已在黑名单中，无需重复添加`);
+            return "\n📝 已在黑名单中";
+        }
+
+        blacklist.push(courseIdStr);
+        $.setdata(blacklist.join(","), CONFIG.blacklistKey);
+        console.log(`[signup] 已将课程 ${courseIdStr} 添加到黑名单`);
+        return "\n📝 已自动添加到黑名单";
+    } catch (e) {
+        console.log(`[signup] 添加黑名单失败: ${e}`);
+        return "\n⚠️ 添加黑名单失败";
+    }
 }

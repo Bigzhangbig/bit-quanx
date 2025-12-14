@@ -153,6 +153,18 @@ class Env {
                 callback(e, null, null);
             });
 
+            // 支持可选超时（毫秒），当传入 opts.timeout 时触发
+            if (opts && opts.timeout) {
+                try {
+                    req.setTimeout(Number(opts.timeout), () => {
+                        try { req.abort(); } catch (e) {}
+                        callback(new Error('请求超时'), null, null);
+                    });
+                } catch (e) {
+                    // ignore
+                }
+            }
+
             if (body) {
                 req.write(body);
             }
