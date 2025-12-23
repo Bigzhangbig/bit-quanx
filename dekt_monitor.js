@@ -171,6 +171,21 @@ async function checkCourses() {
     // 遍历所有栏目
     for (let cat of CONFIG.categories) {
         let maxIdInThisLoop = cache[cat.id] || 0;
+
+        // 如果该栏目被配置为自动报名栏目黑名单，则跳过对该栏目的所有请求
+        try {
+            const catIdNum = Number(cat.id);
+            const catNameStr = String(cat.name || "");
+            const isAutoBlacklistedById = Array.isArray(blacklistAutoCategoryIds) && blacklistAutoCategoryIds.some(id => Number(id) === catIdNum);
+            const isAutoBlacklistedByName = Array.isArray(blacklistAutoCategoryNames) && blacklistAutoCategoryNames.some(n => String(n) === catNameStr);
+            if (isAutoBlacklistedById || isAutoBlacklistedByName) {
+                if (isDebug) console.log(`[Debug] 跳过栏目 ${cat.name} (ID:${cat.id}) - 在自动报名栏目黑名单中，未发送请求`);
+                // 保持原有缓存值不变，继续下一个栏目
+                continue;
+            }
+        } catch (e) {
+            console.log(`[Debug] 检查栏目黑名单时出错: ${e}`);
+        }
         
         // 遍历状态：未开始(1), 进行中(2)
         for (let status of [1, 2]) {
