@@ -28,6 +28,7 @@
         "bit_sc_pickup_mode",
         "bit_sc_random_delay",
         "bit_sc_signup_list",
+        "bit_sc_last_signup",
         "bit_sc_auto_sign_all",
         "bit_sc_runtime_sign_ids",
         "bit_sc_auto_blacklist_categories"
