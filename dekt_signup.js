@@ -21,7 +21,8 @@ const CONFIG = {
     
     // APIs
     applyUrl: "https://qcbldekt.bit.edu.cn/api/course/apply",
-    myListUrl: "https://qcbldekt.bit.edu.cn/api/transcript/course/signIn/list?page=1&limit=20&type=1",
+    // OLD: myListUrl: "https://qcbldekt.bit.edu.cn/api/transcript/course/signIn/list?page=1&limit=20&type=1",
+    myListUrl: "https://qcbldekt.bit.edu.cn/api/course/list/my?page=1&limit=20",
     infoUrl: "https://qcbldekt.bit.edu.cn/api/transcript/checkIn/info",
     
     // Constants
@@ -138,7 +139,12 @@ async function main() {
 
     // 2. 获取已报名列表 (用于去重)
     const myCourses = await getMyCourses(headers);
-    const myCourseIdsSet = new Set(myCourses.map(c => c.course_id));
+    const myCourseIdsSet = new Set(
+        myCourses
+            .map(c => (c && c.course_id != null ? c.course_id : c && c.id != null ? c.id : null))
+            .filter(v => v != null)
+            .map(v => String(v))
+    );
 
     let newList = [];
     let hasChange = false;
@@ -151,7 +157,7 @@ async function main() {
         log(`\n[Course] 处理: ${title} (ID: ${courseId})`);
 
         // 检查是否已报名
-        if (myCourseIdsSet.has(courseId)) {
+        if (myCourseIdsSet.has(String(courseId))) {
             log(`✅ 已在“我的活动”列表中，跳过并移除`);
             hasChange = true;
             continue;

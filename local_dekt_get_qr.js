@@ -15,8 +15,9 @@ const $ = new Env("获取二维码");
 // 配置
 const CONFIG = {
     tokenKey: "bit_sc_token",
-    // 签到列表接口
-    listUrl: "https://qcbldekt.bit.edu.cn/api/transcript/course/signIn/list?page=1&limit=20&type=1",
+    // OLD: 签到列表接口
+    // listUrl: "https://qcbldekt.bit.edu.cn/api/transcript/course/signIn/list?page=1&limit=20&type=1",
+    listUrl: "https://qcbldekt.bit.edu.cn/api/course/list/my?page=1&limit=20",
     infoUrl: "https://qcbldekt.bit.edu.cn/api/transcript/checkIn/info",
     qrBaseUrl: "https://qcbldekt.bit.edu.cn/qrcode/event/?course_id=",
     saveDir: path.join(__dirname, 'qrcodes'),

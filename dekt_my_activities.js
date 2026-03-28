@@ -188,14 +188,9 @@ async function getMyCourseList(headers) {
         return CACHE.myCourseList;
     }
     try {
-        // 新接口
-        let usedUrl = CONFIG.myCourseListUrl;
-        let data = await httpGet(usedUrl, headers);
-        // 若失败则尝试旧接口
-        if (!(data && data.code === 200)) {
-            usedUrl = "https://qcbldekt.bit.edu.cn/api/transcript/course/list/my?page=1&limit=200";
-            data = await httpGet(usedUrl, headers);
-        }
+        // 仅使用新版接口
+        const usedUrl = CONFIG.myCourseListUrl;
+        const data = await httpGet(usedUrl, headers);
         if (data && data.code === 200) {
             let items = [];
             // 兼容多种返回结构

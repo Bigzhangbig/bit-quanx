@@ -26,11 +26,16 @@ const CONFIG = {
     tokenKey: "bit_sc_token",
     autoSignAllKey: "bit_sc_auto_sign_all",
     runtimeIdsKey: "bit_sc_runtime_sign_ids",
-    listUrl: "https://qcbldekt.bit.edu.cn/api/transcript/course/signIn/list?page=1&limit=20&type=1",
+    // OLD: signIn 列表接口（当前链路不稳定，已停用）
+    // listUrl: "https://qcbldekt.bit.edu.cn/api/transcript/course/signIn/list?page=1&limit=20&type=1",
+    listUrl: "https://qcbldekt.bit.edu.cn/api/course/list/my?page=1&limit=20",
     infoUrl: "https://qcbldekt.bit.edu.cn/api/transcript/checkIn/info",
     signInUrl: "https://qcbldekt.bit.edu.cn/api/transcript/signIn",
     courseInfoUrlRest: "https://qcbldekt.bit.edu.cn/api/course/info/",
-    myCourseListUrl: "https://qcbldekt.bit.edu.cn/api/course/list/my?page=1&limit=20"
+    myCourseListUrl: "https://qcbldekt.bit.edu.cn/api/course/list/my?page=1&limit=20",
+    requestTimeoutMs: 12000,
+    detailRetryCount: 3,
+    detailRetryBaseDelayMs: 700
 };
 
 // 栏目映射（与 dekt_my_activities.js 保持一致）
@@ -81,7 +86,8 @@ async function main() {
             await handleCourseList(courses, headers, autoSignAll);
             try {
                 for (const c of courses) {
-                    if (c && (c.course_id != null)) processedIds.add(String(c.course_id));
+                    const cid = c && (c.course_id != null ? c.course_id : c.id);
+                    if (cid != null) processedIds.add(String(cid));
                 }
             } catch {}
 
@@ -150,17 +156,19 @@ async function collectCoursesInWindow(courses, headers) {
     if (!Array.isArray(courses) || courses.length === 0) return out;
     for (const course of courses) {
         try {
-            const info = await getCourseInfo(course.course_id, headers);
+            const cid = course && (course.course_id != null ? course.course_id : course.id);
+            if (cid == null) continue;
+            const info = await getCourseInfo(cid, headers);
             if (!info) continue;
             const si = isInWindow(info, 'signIn');
             const so = isInWindow(info, 'signOut');
             if (si || so) {
-                const title = course.course_title || info.course_title || String(course.course_id);
+                const title = course.course_title || course.title || info.course_title || String(cid);
                 const column = resolveCategoryName(info, course) || '';
                 const when = si && so ? '签到/签退' : (si ? '签到' : '签退');
                 const timeRange = si ? `${info.sign_in_start_time || ''} - ${info.sign_in_end_time || ''}` : `${info.sign_out_start_time || ''} - ${info.sign_out_end_time || ''}`;
-                const duration = (await getCourseDuration(course.course_id, headers)) || '';
-                out.push({ id: course.course_id, column, title, when, timeRange, duration });
+                const duration = (await getCourseDuration(cid, headers)) || '';
+                out.push({ id: cid, column, title, when, timeRange, duration });
             }
         } catch (e) {
             // 忽略单个课程出错，继续处理其它
@@ -183,19 +191,21 @@ async function getCourseList(headers) {
 // ====== 处理课程列表 ======
 async function handleCourseList(courses, headers, autoSignAll) {
     for (const course of courses) {
+        const cid = course && (course.course_id != null ? course.course_id : course.id);
+        if (cid == null) continue;
         // 参考 my_activities：过滤已取消课程（改为精确匹配）
         if (course.status_label && String(course.status_label).trim() === "已取消") continue;
         if (typeof course.status !== 'undefined' && (course.status === 4 || course.status === '4')) continue;
-        const info = await getCourseInfo(course.course_id, headers);
+        const info = await getCourseInfo(cid, headers);
         if (!info) continue;
         if (isSignOutExpired(info)) continue;
-        const meta = await getCourseMeta(course.course_id, headers);
+        const meta = await getCourseMeta(cid, headers);
         if (meta && meta.completionType === 'time') {
-            const safeTitle = course.course_title || info.course_title || String(course.course_id);
-            showCourseLog(course.course_id, safeTitle, info, meta);
+            const safeTitle = course.course_title || course.title || info.course_title || String(cid);
+            showCourseLog(cid, safeTitle, info, meta);
             if (autoSignAll) {
-                await trySign(course.course_id, info, headers, '签到', safeTitle);
-                await trySign(course.course_id, info, headers, '签退', safeTitle);
+                await trySign(cid, info, headers, '签到', safeTitle);
+                await trySign(cid, info, headers, '签退', safeTitle);
             }
         }
     }
@@ -260,19 +270,12 @@ async function getCourseDuration(courseId, headers) {
     } catch (e) {
         // 忽略错误，继续兜底
     }
-    // 2) 我的课程列表兜底
+    // 2) 我的课程列表兜底（仅使用新版接口）
     try {
         const list = await httpGet(CONFIG.myCourseListUrl, headers);
         if (list && list.code === 200 && list.data && Array.isArray(list.data.items)) {
             const found = list.data.items.find(x => String(x.course_id || x.id) === String(courseId));
             if (found && found.duration != null) return found.duration;
-        } else {
-            // 旧接口兜底
-            const oldList = await httpGet("https://qcbldekt.bit.edu.cn/api/transcript/course/list/my?page=1&limit=200", headers);
-            if (oldList && oldList.code === 200 && oldList.data && Array.isArray(oldList.data.items)) {
-                const found2 = oldList.data.items.find(x => String(x.course_id || x.id) === String(courseId));
-                if (found2 && found2.duration != null) return found2.duration;
-            }
         }
     } catch (e) {
         // 忽略错误
@@ -282,18 +285,29 @@ async function getCourseDuration(courseId, headers) {
 
 async function getCourseInfo(courseId, headers) {
     const url = `${CONFIG.infoUrl}?course_id=${courseId}`;
-    try {
-        const data = await httpGet(url, headers);
-        if (data && data.code === 200) {
-            return data.data;
-        } else {
+    for (let i = 1; i <= CONFIG.detailRetryCount; i++) {
+        try {
+            const data = await httpGet(url, headers, CONFIG.requestTimeoutMs);
+            if (data && data.code === 200) {
+                return data.data;
+            }
+            // 服务端业务错误通常重试收益低，直接返回
             console.log(`❌ 获取课程详情失败: ${JSON.stringify(data)}`);
             return null;
+        } catch (e) {
+            const errText = (e && e.message) ? e.message : String(e);
+            const retryable = isRetryableNetworkError(e);
+            const isLast = i >= CONFIG.detailRetryCount;
+            if (!retryable || isLast) {
+                console.error(`❌ 获取课程详情异常: ${errText}`);
+                return null;
+            }
+            const delay = CONFIG.detailRetryBaseDelayMs * i;
+            console.log(`⚠️ 获取课程详情异常(第${i}次): ${errText}，${delay}ms 后重试`);
+            await sleep(delay);
         }
-    } catch (e) {
-        console.error(`❌ 获取课程详情异常: ${e}`);
-        return null;
     }
+    return null;
 }
 
 // 解析栏目/分类名称：优先使用 transcript_index_id -> transcript_name -> transcript_index.transcript_name
@@ -511,9 +525,11 @@ function getRandomCoordinate(lat, lon, rangeMeters) {
     return { lat: newLat, lon: newLon };
 }
 
-function httpGet(url, headers) {
+function httpGet(url, headers, timeoutMs) {
     return new Promise((resolve, reject) => {
-        $.get({ url, headers }, (err, resp, data) => {
+        const reqOpt = { url, headers };
+        if (timeoutMs && Number.isFinite(timeoutMs)) reqOpt.timeout = timeoutMs;
+        $.get(reqOpt, (err, resp, data) => {
             if (err) {
                 reject(err);
             } else {
@@ -526,6 +542,22 @@ function httpGet(url, headers) {
             }
         });
     });
+}
+
+function isRetryableNetworkError(err) {
+    const msg = ((err && err.message) ? err.message : String(err || "")).toLowerCase();
+    return (
+        msg.includes("socket hang up") ||
+        msg.includes("econnreset") ||
+        msg.includes("etimedout") ||
+        msg.includes("timeout") ||
+        msg.includes("eai_again") ||
+        msg.includes("network")
+    );
+}
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function httpPost(options) {

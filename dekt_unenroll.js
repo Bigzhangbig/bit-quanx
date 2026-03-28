@@ -100,7 +100,7 @@ async function main() {
       const hint = (result.status === 401 || result.code === 401) ? "(Token 失效，请重新获取)" : "";
 
       if (String(detail).includes('报名记录不存在') || String(detail).includes('未找到报名')) {
-        console.log('[unenroll] 检测到报名记录不存在，尝试获取正确的 user_id 或先报名再重试取消');
+        console.log('[unenroll] 检测到报名记录不存在，尝试获取正确的 user_id 后重试取消');
 
         // 1) 尝试从 /api/user/info 获取 user_id
         try {
@@ -120,45 +120,6 @@ async function main() {
           console.log(`[unenroll] 获取 user_id 失败: ${e}`);
         }
 
-        // 2) 若仍未报名，尝试调用报名逻辑（复用 dekt_signup.js autoSignup）再重试取消
-        try {
-          let signupModule = null;
-          try { signupModule = require('./dekt_signup.js'); } catch (e) { signupModule = null; }
-          if (signupModule && typeof signupModule.autoSignup === 'function') {
-            console.log('[unenroll] 调用 dekt_signup.autoSignup 进行报名');
-            const sres = await signupModule.autoSignup(courseId, headers);
-            console.log(`[unenroll] 报名返回: ${JSON.stringify(sres).slice(0,200)}`);
-            // 报名后可选地拉取我的课程列表以确认报名条目（仅在 DEBUG 模式下执行，避免常规运行产生额外请求）
-            if (DEBUG) {
-              try {
-                const myTransList = await httpGet(`${HOST}/api/transcript/course/signIn/list?page=1&limit=200&type=1`, headers);
-                debugLog('[unenroll] transcript/signIn/list 返回：', String(myTransList.body).slice(0,1000));
-              } catch (e) { debugLog('[unenroll] 拉取 transcript 列表异常:', e); }
-              try {
-                const myCourseList = await httpGet(`${HOST}/api/course/list/my?page=1&limit=200`, headers);
-                debugLog('[unenroll] course/list/my 返回：', String(myCourseList.body).slice(0,1000));
-              } catch (e) { debugLog('[unenroll] 拉取 course/list/my 异常:', e); }
-            }
-            if (sres && sres.success) {
-              // 报名成功后稍等并重试取消
-              await new Promise(r => setTimeout(r, 2000));
-              const retry2 = await tryCancel(courseId, userId, headers);
-              if (isSuccess(retry2)) {
-                const blacklistMsg3 = addToBlacklist(courseId);
-                notify('第二课堂取消报名', subTitle, `已取消报名（${CANCEL_PATH}）${blacklistMsg3}`);
-                console.log(`[unenroll] 报名后重试取消成功: status=${retry2.status}`);
-                return done();
-              }
-              console.log(`[unenroll] 报名后重试取消仍失败: ${String(retry2.body).slice(0,200)}`);
-            } else {
-              console.log('[unenroll] 自动报名失败或返回非成功，放弃自动报名重试');
-            }
-          } else {
-            console.log('[unenroll] 未找到 dekt_signup.autoSignup，无法自动报名重试');
-          }
-        } catch (e) {
-          console.log(`[unenroll] 自动报名并重试发生异常: ${e}`);
-        }
       }
 
       const msg = `取消失败：HTTP ${result.status || "未知"} ${detail} ${hint} [${result.path || "未知接口"}]`;
