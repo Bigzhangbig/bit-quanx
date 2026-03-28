@@ -135,13 +135,23 @@ async function checkCourses() {
         return;
     }
 
-    const headers = JSON.parse(savedHeaders || "{}");
-    headers['Authorization'] = token;
+    const headers = {};
+    headers['Authorization'] = normalizeAuthToken(token);
     headers['Content-Type'] = 'application/json;charset=utf-8';
-    if (!headers['Accept-Encoding']) {
-        headers['Accept-Encoding'] = 'gzip, deflate, br';
+
+    if (!headers['Authorization']) {
+        $.msg("❌ Token 无效", "", "请先运行 bit_cookie.js 脚本重新获取 Token。");
+        $done();
+        return;
     }
 
+
+function normalizeAuthToken(token) {
+    if (!token) return "";
+    const t = String(token).trim();
+    if (!t) return "";
+    return /^Bearer\s+/i.test(t) ? t : `Bearer ${t}`;
+}
     // --- 新增：检查待报名列表 (仅 Debug 模式) ---
     if (isDebug) {
         await checkSignupList(token, headers, userId);
@@ -473,7 +483,6 @@ async function autoSignup(courseId, token, headers) {
     // 复制 headers 并移除 Content-Length
     const reqHeaders = JSON.parse(JSON.stringify(headers));
     delete reqHeaders['Content-Length'];
-    reqHeaders['Host'] = 'qcbldekt.bit.edu.cn';
 
     const body = {
         course_id: parseInt(courseId),

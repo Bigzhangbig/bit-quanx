@@ -17,9 +17,9 @@ const CONFIG = {
 (async () => {
     try {
         const token = $.getdata(CONFIG.tokenKey);
-        const headers = JSON.parse($.getdata(CONFIG.headersKey) || "{}");
-        if (!token || !headers) {
-            $.msg($.name, "未获取到Token或Headers", "请先运行cookie脚本获取Token");
+        const authHeader = normalizeAuthToken(token);
+        if (!authHeader) {
+            $.msg($.name, "未获取到有效Token", "请先运行cookie脚本获取Token");
             $done();
             return;
         }
@@ -63,12 +63,12 @@ const CONFIG = {
 
         // 预取一次全部课程列表作为备份（如果 API 支持分页，会完整拉取）
         let fullCourseList = null;
-        try { fullCourseList = await getCourseListAll(token, headers); } catch (e) { fullCourseList = null; }
+        try { fullCourseList = await getCourseListAll(authHeader); } catch (e) { fullCourseList = null; }
 
         for (const id of blacklist) {
             let keep = false;
             try {
-                const info = await getCourseInfoById(id, token, headers);
+                const info = await getCourseInfoById(id, authHeader);
                 if (info && info.status !== undefined && info.status !== null) {
                     // status 3/4 表示已结束或已取消 -> 不保留
                     if (info.status !== 3 && info.status !== 4) keep = true;
@@ -114,14 +114,20 @@ const CONFIG = {
     $done();
 })();
 
-async function getCourseList(token, headers) {
+function normalizeAuthToken(token) {
+    if (!token) return "";
+    const t = String(token).trim();
+    if (!t) return "";
+    return /^Bearer\s+/i.test(t) ? t : `Bearer ${t}`;
+}
+
+async function getCourseList(authHeader) {
     const url = "https://qcbldekt.bit.edu.cn/api/course/list";
     const myRequest = {
         url: url,
         method: "GET",
         headers: {
-            ...headers,
-            "Authorization": token
+            "Authorization": authHeader
         }
     };
     return new Promise((resolve) => {
@@ -146,14 +152,13 @@ async function getCourseList(token, headers) {
 }
 
 // 按 ID 获取课程详情（优先用于确认单个课程状态）
-async function getCourseInfoById(courseId, token, headers) {
+async function getCourseInfoById(courseId, authHeader) {
     const url = `https://qcbldekt.bit.edu.cn/api/course/info/${courseId}`;
     const myRequest = {
         url: url,
         method: "GET",
         headers: {
-            ...headers,
-            "Authorization": token
+            "Authorization": authHeader
         }
     };
     return new Promise((resolve) => {
@@ -178,7 +183,7 @@ async function getCourseInfoById(courseId, token, headers) {
 }
 
 // 分页拉取全部课程列表（尽可能遍历所有页，取决于后端分页支持）
-async function getCourseListAll(token, headers) {
+async function getCourseListAll(authHeader) {
     const pageSize = 100; // 尝试大页大小以减少请求次数
     let page = 1;
     const all = [];
@@ -188,8 +193,7 @@ async function getCourseListAll(token, headers) {
             url: url,
             method: "GET",
             headers: {
-                ...headers,
-                "Authorization": token
+                "Authorization": authHeader
             }
         };
         const pageItems = await new Promise((resolve) => {

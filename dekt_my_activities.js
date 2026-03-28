@@ -65,16 +65,15 @@ if (typeof module === 'undefined' || require.main === module) {
 async function checkActivities() {
     const token = $.getdata(CONFIG.tokenKey);
     const isDebug = isDebugMode();
-    if (!token) {
+    const authToken = normalizeAuthToken(token);
+    if (!authToken) {
         notify($.name, "❌ 未找到 Token", "请先在 BoxJS 或本地配置 bit_sc_token");
         return;
     }
 
     const headers = {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json;charset=utf-8',
-        'Host': 'qcbldekt.bit.edu.cn',
-        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.10(0x18000a2a) NetType/WIFI Language/zh_CN'
+        'Authorization': authToken,
+        'Content-Type': 'application/json;charset=utf-8'
     };
 
     try {
@@ -110,13 +109,13 @@ async function checkActivities() {
         }
     } catch (error) {
         log("请求失败: " + error);
-        notify($.name, "请求失败", error);
+        notify($.name, "请求失败", toErrorText(error));
     }
 }
 
-function httpGet(url, headers, timeout = 10000) {
-    // 将默认超时从 20s 降到 10s，并默认不再自动重试以减少感知延迟
-    return httpGetWithRetry(url, headers, timeout, 0);
+function httpGet(url, headers, timeout = 15000) {
+    // 查询接口存在偶发抖动，保留 1 次快速重试，降低假失败概率
+    return httpGetWithRetry(url, headers, timeout, 1);
 }
 
 function httpGetWithRetry(url, headers, timeout, retries) {
@@ -502,16 +501,38 @@ function Env(t, e) { class s { constructor(t) { this.env = t } } return new clas
 // 统一通知出口：支持调试模式不发送通知
 function notify(title, subtitle = "", body = "", options) {
     const isDebug = String($.getdata(CONFIG.debugKey) || "false").toLowerCase() === "true";
+    const bodyText = toErrorText(body);
     if (isDebug) {
-        log(`[DEBUG] 抑制通知 -> ${title} | ${subtitle} | ${body && body.substring(0, 80)}`);
+        log(`[DEBUG] 抑制通知 -> ${title} | ${subtitle} | ${bodyText.substring(0, 80)}`);
         return;
     }
-    $.msg(title, subtitle, body, options);
+    $.msg(title, subtitle, bodyText, options);
+}
+
+// 将任意错误对象/值统一转成可读文本，避免调试日志中字符串方法报错
+function toErrorText(value) {
+    if (value == null) return "";
+    if (typeof value === 'string') return value;
+    if (value instanceof Error) return value.message || String(value);
+    if (typeof value === 'object') {
+        try { return JSON.stringify(value); } catch (_) { return String(value); }
+    }
+    return String(value);
 }
 
 // 获取调试模式
 function isDebugMode() {
     return String($.getdata(CONFIG.debugKey) || "false").toLowerCase() === "true";
+}
+
+// 统一 token 形态为 "Bearer <id|token>"，避免出现 "Bearer Bearer ..."
+function normalizeAuthToken(token) {
+    if (!token) return "";
+    let raw = String(token).trim();
+    raw = raw.replace(/^(?:Bearer\s+)+/i, '').trim();
+    if (!raw) return '';
+    raw = `Bearer ${raw}`;
+    return raw;
 }
 
 // 导出统一入口，便于本地或其他脚本调用

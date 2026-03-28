@@ -37,13 +37,19 @@ const CONFIG = {
 const LOG_PREFIX = '[DEKT]';
 function log(msg) { console.log(`${LOG_PREFIX} ${msg}`); }
 
+function normalizeAuthToken(token) {
+    if (!token) return "";
+    const t = String(token).trim();
+    if (!t) return "";
+    return /^Bearer\s+/i.test(t) ? t : `Bearer ${t}`;
+}
+
 (async () => {
     await main();
 })();
 
 async function main() {
     const token = $.getdata(CONFIG.tokenKey);
-    const savedHeaders = $.getdata(CONFIG.headersKey);
     const userId = $.getdata(CONFIG.userIdKey) || deriveUserId(token);
     const isNotifyNoUpdate = $.getdata(CONFIG.notifyNoUpdateKey) === "true";
     let hasNotified = false;
@@ -54,11 +60,16 @@ async function main() {
         return;
     }
 
-    const headers = JSON.parse(savedHeaders || "{}");
-    headers['Authorization'] = token;
+    const authToken = normalizeAuthToken(token);
+    if (!authToken) {
+        $.msg($.name, "❌ Token 无效", "请重新运行 bit_cookie.js 获取 Token");
+        $.done();
+        return;
+    }
+
+    const headers = {};
+    headers['Authorization'] = authToken;
     headers['Content-Type'] = 'application/json;charset=utf-8';
-    delete headers['Content-Length'];
-    headers['Host'] = 'qcbldekt.bit.edu.cn';
 
     // 1. 获取待报名列表
     let signupList = [];

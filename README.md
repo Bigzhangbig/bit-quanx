@@ -68,6 +68,14 @@
     *   用法: `node local_card_gist_check.js`
 
 ## 使用说明
+
+### 第二课堂最小鉴权结论（实测）
+
+* `GET /api/user/info`：仅需 `Authorization: Bearer <token>`，可从返回的 `data.id` 获取当前 `user_id`。
+* `POST /api/course/apply`（报名）：不强制要求 `user_id`。
+* `POST /api/course/cancelApply`（取消报名）：需要 `user_id`，缺失通常返回参数校验失败。
+* 约定：仅在取消报名链路自动补齐 `user_id`；其他脚本（报名/监控/查询）不自动补齐 `user_id`。
+
 ### Copilot 提示词
 
 - 说明文件：`.github/copilot-instructions.md`

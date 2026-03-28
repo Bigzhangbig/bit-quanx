@@ -122,14 +122,17 @@ function getEnvConfig() {
 // 构建请求 Headers（从保存字符串 + token 统一生成）
 function buildHeaders(savedHeadersStr, token) {
     let headers = {};
-    if (savedHeadersStr) {
-        try { headers = JSON.parse(savedHeadersStr); } catch {}
-    }
-    headers['Authorization'] = token && token.startsWith("Bearer") ? token : `Bearer ${token}`;
+    headers['Authorization'] = normalizeAuthToken(token);
     headers['Content-Type'] = 'application/json;charset=utf-8';
-    headers['Host'] = 'qcbldekt.bit.edu.cn';
-    if (headers['Content-Length']) delete headers['Content-Length'];
+    if (!headers['Authorization']) return {};
     return headers;
+}
+
+function normalizeAuthToken(token) {
+    if (!token) return "";
+    const t = String(token).trim();
+    if (!t) return "";
+    return /^Bearer\s+/i.test(t) ? t : `Bearer ${t}`;
 }
 
 // 收集处于签到/签退窗口的课程，用于统一通知/展示

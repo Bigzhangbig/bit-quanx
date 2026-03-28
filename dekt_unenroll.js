@@ -222,23 +222,13 @@ function tryParseJSON(s) {
 }
 
 function normalizeHeaders(h, token) {
-  const headers = Object.assign({}, h || {});
-  // 标准头
-  headers["Accept"] = headers["Accept"] || "application/json, text/plain, */*";
+  const headers = {};
   headers["Content-Type"] = "application/json;charset=utf-8";
-  headers["Origin"] = headers["Origin"] || HOST;
-  headers["Referer"] = headers["Referer"] || "https://servicewechat.com/wx89b19258915c9585/25/page-frame.html";
-  headers["User-Agent"] = headers["User-Agent"] || "Mozilla/5.0 (iPad; CPU OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.65(0x18004130) NetType/WIFI Language/zh_CN";
-  headers["Host"] = headers["Host"] || "qcbldekt.bit.edu.cn";
+  headers["Accept"] = "application/json, text/plain, */*";
   // 注入 token（若 headers 中未包含）
   if (token) {
-    const hasAuth =
-      Object.keys(headers).some(k => k.toLowerCase() === "authorization") ||
-      Object.keys(headers).some(k => k.toLowerCase() === "token");
-    if (!hasAuth) {
-      // 常见两种携带方式，优先 Bearer
-      headers["Authorization"] = `Bearer ${token}`;
-    }
+    const normalized = /^Bearer\s+/i.test(String(token).trim()) ? String(token).trim() : `Bearer ${String(token).trim()}`;
+    headers["Authorization"] = normalized;
   }
   return headers;
 }
@@ -300,7 +290,12 @@ function httpGet(url, headers) {
 
 async function getUserIdFromApi(headers) {
   try {
-    const r = await httpGet(`${HOST}/api/user/info`, headers);
+    const authOnlyHeaders = buildAuthOnlyHeaders(headers);
+    if (!authOnlyHeaders.Authorization && !authOnlyHeaders.authorization) {
+      debugLog('[unenroll-debug] /api/user/info 跳过：缺少 Authorization');
+      return '';
+    }
+    const r = await httpGet(`${HOST}/api/user/info`, authOnlyHeaders);
     debugLog('[unenroll-debug] /api/user/info raw response:', typeof r === 'object' ? (r.body ? String(r.body).slice(0,800) : JSON.stringify(r)) : String(r));
     if (r && r.status >= 200 && r.status < 300 && !r.err) {
       const data = tryParseJSON(r.body) || {};
@@ -312,6 +307,13 @@ async function getUserIdFromApi(headers) {
     console.log(`[unenroll] getUserIdFromApi 异常: ${e}`);
   }
   return '';
+}
+
+function buildAuthOnlyHeaders(headers) {
+  const h = Object.assign({}, headers || {});
+  const auth = h.Authorization || h.authorization || '';
+  if (!auth) return {};
+  return { Authorization: auth };
 }
 
 function sanitizeHeaders(h) {
