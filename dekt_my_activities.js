@@ -26,7 +26,7 @@ const CONFIG = {
     tokenKey: "bit_sc_token",
     // 调试模式开关（来自 BoxJS：bit_sc_debug）
     debugKey: "bit_sc_debug",
-    listUrl: "https://qcbldekt.bit.edu.cn/api/transcript/course/signIn/list?page=1&limit=20&type=1",
+    listUrl: "https://qcbldekt.bit.edu.cn/api/course/list/my?page=1&limit=200",
     // 课程详情 REST 接口（含时长/签到签退时间等）
     courseInfoUrlRest: "https://qcbldekt.bit.edu.cn/api/course/info/",
     // 我的课程列表：使用新路径（旧路径保留在代码兜底处理中）
@@ -101,12 +101,12 @@ async function checkActivities() {
             log("准备后台预拉取失败: " + e);
         }
 
-        const res = await httpGet(CONFIG.listUrl, headers);
-        if (res.code === 200 && res.data && res.data.items) {
-            return await processItems(res.data.items, headers);
-        } else {
-            log("获取列表失败或列表为空: " + JSON.stringify(res));
+        const items = await getMyCourseList(headers);
+        if (Array.isArray(items)) {
+            log(`[checkActivities] 使用主接口 ${CONFIG.listUrl}，拿到 ${items.length} 条我的课程`);
+            return await processItems(items, headers);
         }
+        log("获取列表失败或列表为空");
     } catch (error) {
         log("请求失败: " + error);
         notify($.name, "请求失败", toErrorText(error));
@@ -305,26 +305,22 @@ async function getCourseInfo(courseId, headers) {
 }
 
 async function processItems(items, headers) {
-    const now = new Date();
+    const now = Date.now();
     let notifyItems = [];
     // 收集需要处理的任务（过滤并去重），再并发拉取详情（并发上限）
     const tasks = [];
     for (const item of items) {
+        const statusLabel = getStatusLabel(item);
         // 去除已取消的课程（精确匹配 '已取消' 或 status 为 4）
-        if (item.status_label && String(item.status_label).trim() === "已取消") continue;
+        if (statusLabel === "已取消") continue;
         if (typeof item.status !== 'undefined' && (item.status === 4 || item.status === '4')) continue;
 
-        const isSignIn = item.status_label && String(item.status_label).trim() === "待签到";
-        const isSignOut = item.status_label && String(item.status_label).trim() === "待签退";
+        const isSignIn = statusLabel === "待签到";
+        const isSignOut = statusLabel === "待签退";
         if (!(isSignIn || isSignOut)) continue;
 
-        const endTimeStr = isSignIn ? item.sign_in_end_time : item.sign_out_end_time;
-        if (!endTimeStr) continue;
-        const endTime = new Date(endTimeStr.replace(/-/g, '/'));
-        if (isNaN(endTime.getTime())) continue;
-        if (now >= endTime) continue; // 已经过期
-
-        tasks.push({ item, isSignIn });
+        // 先按状态入队，具体时间窗在详情阶段用 course/info 再校验，避免列表字段缺失造成漏掉活动
+        tasks.push({ item, isSignIn, statusLabel });
     }
 
     if (tasks.length === 0) {
@@ -359,8 +355,14 @@ async function processItems(items, headers) {
     const mapper = async (task) => {
         const item = task.item;
         const isSignIn = task.isSignIn;
-        const id = item.course_id;
-        log(`[courseInfo] 开始拉取详情 id=${id} 标题=${item.course_title}`);
+        const statusLabel = task.statusLabel;
+        const id = item.course_id || item.id;
+        const title = item.course_title || item.title || `课程${id || ''}`;
+        if (!id) {
+            log('[courseInfo] 跳过：缺少 course_id/id');
+            return null;
+        }
+        log(`[courseInfo] 开始拉取详情 id=${id} 标题=${title}`);
         const start = Date.now();
         let info = null;
         try {
@@ -372,10 +374,25 @@ async function processItems(items, headers) {
         const dur = Date.now() - start;
         log(`[courseInfo] 完成 id=${id} 耗时 ${dur} ms`);
 
-        const signInStart = info ? info.sign_in_start_time : item.sign_in_start_time;
-        const signInEnd = info ? info.sign_in_end_time : item.sign_in_end_time;
-        const signOutStart = info ? info.sign_out_start_time : item.sign_out_start_time;
-        const signOutEnd = info ? info.sign_out_end_time : item.sign_out_end_time;
+        const signInStart = (info && info.sign_in_start_time) || item.sign_in_start_time;
+        const signInEnd = (info && info.sign_in_end_time) || item.sign_in_end_time;
+        const signOutStart = (info && info.sign_out_start_time) || item.sign_out_start_time;
+        const signOutEnd = (info && info.sign_out_end_time) || item.sign_out_end_time;
+        const deadlineRaw = isSignIn ? signInEnd : signOutEnd;
+
+        if (!deadlineRaw) {
+            log(`[courseInfo] 跳过 id=${id}：未拿到${isSignIn ? '签到' : '签退'}截止时间`);
+            return null;
+        }
+        const deadlineTs = new Date(String(deadlineRaw).replace(/-/g, '/')).getTime();
+        if (!Number.isFinite(deadlineTs)) {
+            log(`[courseInfo] 跳过 id=${id}：截止时间无法解析 ${deadlineRaw}`);
+            return null;
+        }
+        if (now >= deadlineTs) {
+            log(`[courseInfo] 跳过 id=${id}：已过截止时间 ${deadlineRaw}`);
+            return null;
+        }
 
         let category = null;
         const catId = (info && info.transcript_index_id) || item.transcript_index_id;
@@ -396,19 +413,19 @@ async function processItems(items, headers) {
             const m = String(info.completion_flag_text).match(/(\d{1,3})\s*分钟/);
             if (m) duration = parseInt(m[1], 10);
         }
-        const durationSource = (info && info._source && info._source.duration) || (item && item.duration != null ? 'signInList.duration' : null) || 'unknown';
+        const durationSource = (info && info._source && info._source.duration) || (item && item.duration != null ? 'myCourseItem.duration' : null) || 'unknown';
 
         return {
-            title: item.course_title,
+            title: title,
             action: isSignIn ? "签到" : "签退",
-            deadline: isSignIn ? item.sign_in_end_time : item.sign_out_end_time,
+            deadline: deadlineRaw,
             id: id,
             signInStart: signInStart,
             signInEnd: signInEnd,
             signOutStart: signOutStart,
             signOutEnd: signOutEnd,
             category: categoryName,
-            statusLabel: item.status_label,
+            statusLabel: statusLabel,
             duration: duration,
             durationSource: durationSource
         };
@@ -447,8 +464,8 @@ async function processItems(items, headers) {
                 case 'completion_flag_text':
                     ds = ' (规则解析)';
                     break;
-                case 'signInList.duration':
-                    ds = ' (签到列表)';
+                case 'myCourseItem.duration':
+                    ds = ' (我的课程列表)';
                     break;
                 default:
                     ds = '';
@@ -493,6 +510,16 @@ async function processItems(items, headers) {
     }
 
     return notifyItems;
+}
+
+function getStatusLabel(item) {
+    const label = item && item.status_label ? String(item.status_label).trim() : '';
+    if (label) return label;
+    const s = String(item && item.status != null ? item.status : '').trim();
+    if (s === '0') return '待签到';
+    if (s === '1') return '待签退';
+    if (s === '4') return '已取消';
+    return label;
 }
 
 // Env Polyfill

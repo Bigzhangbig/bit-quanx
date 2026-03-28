@@ -248,8 +248,6 @@ function isSuccess(resp) {
     // 常见成功判定：code==200/0 或 success==true 或 message含“成功”
     if (data.code === 200 || data.code === 0 || data.success === true) return true;
     if (typeof data.message === "string" && data.message.includes("成功")) return true;
-    // 无结构但 2xx 也视为成功
-    if (!resp.body || resp.body === "") return true;
   }
   return false;
 }
