@@ -71,6 +71,20 @@ async function checkActivities() {
         return;
     }
 
+    // 动态获取微信小程序跳转链接，失败时直接跳转微信
+    let openUrl = null;
+    try {
+        const dynamicUrl = await getWechatJumpLink();
+        if (dynamicUrl) {
+            openUrl = dynamicUrl;
+        } else {
+            openUrl = "weixin://"; // 获取失败，直接跳转微信
+        }
+    } catch (e) {
+        console.error('获取动态链接失败，直接跳转微信:', e);
+        openUrl = "weixin://"; // 发生错误，直接跳转微信
+    }
+
     const headers = {
         'Authorization': authToken,
         'Content-Type': 'application/json;charset=utf-8'
@@ -501,7 +515,7 @@ async function processItems(items, headers) {
                 $.name,
                 `还有 ${restItems.length} 个活动待处理`,
                 summary + "\n点击跳转小程序",
-                {"open-url": "weixin://dl/business/?t=34E4TP288tr"}
+                {"open-url": openUrl}
             );
             log(`已通知其余 ${restItems.length} 个活动`);
         }
@@ -550,6 +564,34 @@ function toErrorText(value) {
 // 获取调试模式
 function isDebugMode() {
     return String($.getdata(CONFIG.debugKey) || "false").toLowerCase() === "true";
+}
+
+/**
+ * 动态获取微信小程序跳转链接
+ * @param {string} pagePath - 小程序的页面路径 (可选)
+ * @returns {Promise<string|null>} - 返回 weixin:// 开头的链接
+ */
+async function getWechatJumpLink(pagePath = '/pages/index/index') {
+    const apiUrl = `https://qcbldekt.bit.edu.cn/api/generatescheme?path=${encodeURIComponent(pagePath)}`;
+    
+    try {
+        const response = await fetch(apiUrl);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        if (result.code === 200 && result.data) {
+            return result.data; // 返回 weixin://dl/business/?t=...
+        } else {
+            console.error('获取微信小程序链接失败:', result.message);
+            return null;
+        }
+    } catch (error) {
+        console.error('请求微信小程序链接时发生错误:', error);
+        return null;
+    }
 }
 
 // 统一 token 形态为 "Bearer <id|token>"，避免出现 "Bearer Bearer ..."

@@ -37,6 +37,34 @@ const CONFIG = {
 const LOG_PREFIX = '[DEKT]';
 function log(msg) { console.log(`${LOG_PREFIX} ${msg}`); }
 
+/**
+ * 动态获取微信小程序跳转链接
+ * @param {string} pagePath - 小程序的页面路径 (可选)
+ * @returns {Promise<string|null>} - 返回 weixin:// 开头的链接
+ */
+async function getWechatJumpLink(pagePath = '/pages/index/index') {
+    const apiUrl = `https://qcbldekt.bit.edu.cn/api/generatescheme?path=${encodeURIComponent(pagePath)}`;
+    
+    try {
+        const response = await fetch(apiUrl);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        if (result.code === 200 && result.data) {
+            return result.data; // 返回 weixin://dl/business/?t=...
+        } else {
+            console.error('获取微信小程序链接失败:', result.message);
+            return null;
+        }
+    } catch (error) {
+        console.error('请求微信小程序链接时发生错误:', error);
+        return null;
+    }
+}
+
 function normalizeAuthToken(token) {
     if (!token) return "";
     const t = String(token).trim();
@@ -65,6 +93,20 @@ async function main() {
         $.msg($.name, "❌ Token 无效", "请重新运行 bit_cookie.js 获取 Token");
         $.done();
         return;
+    }
+
+    // 动态获取微信小程序跳转链接，失败时直接跳转微信
+    let openUrl = null;
+    try {
+        const dynamicUrl = await getWechatJumpLink();
+        if (dynamicUrl) {
+            openUrl = dynamicUrl;
+        } else {
+            openUrl = "weixin://"; // 获取失败，直接跳转微信
+        }
+    } catch (e) {
+        console.error('获取动态链接失败，直接跳转微信:', e);
+        openUrl = "weixin://"; // 发生错误，直接跳转微信
     }
 
     const headers = {};
@@ -179,7 +221,7 @@ async function main() {
                 await new Promise(r => setTimeout(r, 2000));
                 const courseInfo = await getCourseInfo(courseId, headers);
                 const { statusMsg, subMsg } = computeCourseInfoMessage(courseInfo, title, courseId);
-                $.msg($.name, `✅ ${statusMsg}`, `课程: ${title}\nID: ${courseId}${subMsg}`, { "open-url": "weixin://dl/business/?t=34E4TP288tr" });
+                $.msg($.name, `✅ ${statusMsg}`, `课程: ${title}\nID: ${courseId}${subMsg}`, { "open-url": openUrl });
                 hasNotified = true;
 
             } else {
@@ -187,7 +229,7 @@ async function main() {
                 // 失败后直接移除课程，不再重试
                 hasChange = true;
                 log(`🗑 报名失败，移除课程: ${courseId}`);
-                $.msg($.name, "❌ 报名失败", `课程: ${title}\nID: ${courseId}\n原因: ${result.message}\n重试状态: 0`, { "open-url": "weixin://dl/business/?t=34E4TP288tr" });
+                $.msg($.name, "❌ 报名失败", `课程: ${title}\nID: ${courseId}\n原因: ${result.message}\n重试状态: 0`, { "open-url": openUrl });
                 hasNotified = true;
             }
         }

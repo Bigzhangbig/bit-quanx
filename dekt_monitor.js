@@ -67,6 +67,20 @@ async function checkCourses() {
     const isNotifyNoUpdate = $.getdata(CONFIG.notifyNoUpdateKey) === "true";
     const randomDelay = parseInt($.getdata(CONFIG.delayKey) || "0");
     
+    // 动态获取微信小程序跳转链接，失败时直接跳转微信
+    let openUrl = null;
+    try {
+        const dynamicUrl = await getWechatJumpLink();
+        if (dynamicUrl) {
+            openUrl = dynamicUrl;
+        } else {
+            openUrl = "weixin://"; // 获取失败，直接跳转微信
+        }
+    } catch (e) {
+        console.error('获取动态链接失败，直接跳转微信:', e);
+        openUrl = "weixin://"; // 发生错误，直接跳转微信
+    }
+    
     // 获取筛选配置
     const filterCollege = $.getdata(CONFIG.filterCollegeKey) || "不限";
     const filterGrade = $.getdata(CONFIG.filterGradeKey) || "不限";
@@ -430,9 +444,6 @@ function normalizeAuthToken(token) {
         cache[cat.id] = maxIdInThisLoop;
     }
 
-    // 默认跳转链接
-    let openUrl = "weixin://dl/business/?t=34E4TP288tr";
-
     if (isTokenExpired) {
         $.msg("⚠️ Token 已失效", "", "请重新进入小程序刷新列表获取新的 Token", { "open-url": openUrl });
         $done();
@@ -656,6 +667,34 @@ async function getDurationByIdIfTime(courseId, headers) {
         }
         return Number.isNaN(d) ? null : d;
     } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * 动态获取微信小程序跳转链接
+ * @param {string} pagePath - 小程序的页面路径 (可选)
+ * @returns {Promise<string|null>} - 返回 weixin:// 开头的链接
+ */
+async function getWechatJumpLink(pagePath = '/pages/index/index') {
+    const apiUrl = `https://qcbldekt.bit.edu.cn/api/generatescheme?path=${encodeURIComponent(pagePath)}`;
+    
+    try {
+        const response = await fetch(apiUrl);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        if (result.code === 200 && result.data) {
+            return result.data; // 返回 weixin://dl/business/?t=...
+        } else {
+            console.error('获取微信小程序链接失败:', result.message);
+            return null;
+        }
+    } catch (error) {
+        console.error('请求微信小程序链接时发生错误:', error);
         return null;
     }
 }
