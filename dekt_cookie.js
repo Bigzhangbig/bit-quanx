@@ -4,7 +4,7 @@
  * 描述：监听第二课堂小程序的网络请求，自动提取并保存 Token 和 Headers。
  * 
  * [rewrite_local]
- * ^https:\/\/qcbldekt\.bit\.edu\.cn\/api\/course\/list url script-request-header https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/dekt_cookie.js
+ * ^https:\/\/qcbldekt\.bit\.edu\.cn\/api\/user\/info url script-request-header https://github.com/Bigzhangbig/bit-dekt-quanx/raw/refs/heads/main/dekt_cookie.js
  * 
  * [mitm]
  * hostname = qcbldekt.bit.edu.cn
