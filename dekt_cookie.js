@@ -12,9 +12,28 @@
 
 const $ = new Env("北理工第二课堂-获取Token");
 
+// 统一时间戳日志工具
+function _nowTs() {
+    const d = new Date();
+    const pad = (n, w = 2) => String(n).padStart(w, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+}
+function log(...args) {
+    console.log(`[${_nowTs()}]`, ...args);
+}
+
+// 统一通知函数
+function notify(title, subtitle = "", body = "", options = {}) {
+    const isDebug = String($.getdata(CONFIG.debugKey) || 'false').toLowerCase() === 'true';
+    if (isDebug) {
+        log(`[NOTIFY] ${title} | ${subtitle} | ${body}`);
+    } else {
+        $.msg(title, subtitle, body, options);
+    }
+}
+
 const CONFIG = {
     tokenKey: "bit_sc_token",
-    headersKey: "bit_sc_headers",
     userIdKey: "bit_sc_user_id",
     debugKey: "bit_sc_debug",
     githubTokenKey: "bit_sc_github_token",
@@ -56,41 +75,31 @@ async function getCookie() {
                 const gistResult = await getGist();
                 const gistToken = gistResult && gistResult.ok && gistResult.data ? gistResult.data.token : null;
                 if (gistResult && gistResult.failed) {
-                    $.msg($.name, "获取 Gist 失败", gistResult.message || "无法获取远端数据，请检查配置或网络");
+                    notify($.name, "获取 Gist 失败", gistResult.message || "无法获取远端数据，请检查配置或网络", { force: true });
                 }
-
-                const headersToSave = JSON.stringify({
-                    'User-Agent': $request.headers['User-Agent'] || $request.headers['user-agent'],
-                    'Referer': referer,
-                    'Host': 'qcbldekt.bit.edu.cn',
-                    'Connection': 'keep-alive',
-                    'Accept-Encoding': 'gzip, deflate, br'
-                });
 
                 if (gistToken === auth) {
                     // Token 与 Gist 一致，仅更新本地
                     $.setdata(auth, CONFIG.tokenKey);
-                    $.setdata(headersToSave, CONFIG.headersKey);
                     if (parsedUserId) $.setdata(parsedUserId, CONFIG.userIdKey);
-                    console.log(`[${$.name}] Token与Gist一致，更新本地缓存，不发送通知`);
+                    log(`Token与Gist一致，更新本地缓存，不发送通知`);
                 } else {
                     // Token 不一致，更新本地和 Gist
                     $.setdata(auth, CONFIG.tokenKey);
-                    $.setdata(headersToSave, CONFIG.headersKey);
                     if (parsedUserId) $.setdata(parsedUserId, CONFIG.userIdKey);
                     
                     // 同步到 Gist
-                    const gistOk = await updateGist(auth, headersToSave, parsedUserId);
+                    const gistOk = await updateGist(auth, parsedUserId);
                     if (!gistOk) {
-                        $.msg($.name, "Gist 同步失败", "Token 未能同步到 GitHub Gist，请查看日志");
+                        notify($.name, "Gist 同步失败", "Token 未能同步到 GitHub Gist，请查看日志", { force: true });
                     }
-                    console.log(`[${$.name}] Token 已更新`);
+                    log(`Token 已更新`);
                 }
             } else {
-                if (isDebug) console.log(`[${$.name}] Token 未变化，跳过通知`);
+                if (isDebug) log(`Token 未变化，跳过通知`);
             }
         } else {
-            if (isDebug) console.log(`[${$.name}] 缺少必要Header，跳过`);
+            if (isDebug) log(`缺少必要Header，跳过`);
         }
     }
 }
@@ -132,7 +141,7 @@ async function getGist() {
                                 resolve({ ok: true, data: null });
                             }
                         } catch (e) {
-                            console.log(`[${$.name}] 解析Gist失败: ${e}`);
+                            log(`解析Gist失败: ${e}`);
                             resolve({ ok: false, failed: true, message: `解析 Gist 失败: ${e}` });
                         }
                     } else {
@@ -150,7 +159,7 @@ async function getGist() {
     });
 }
 
-async function updateGist(token, headers, userId) {
+async function updateGist(token, userId) {
     const githubToken = $.getdata(CONFIG.githubTokenKey);
     const gistId = $.getdata(CONFIG.gistIdKey);
     const filename = $.getdata(CONFIG.gistFileNameKey) || "bit_cookies.json";
@@ -176,7 +185,6 @@ async function updateGist(token, headers, userId) {
     const content = JSON.stringify({
         token: token,
         user_id: userId || null,
-        headers: JSON.parse(headers),
         updated_at: new Date().toISOString(),
         boxjs: boxjsConfig
     }, null, 2);
@@ -241,4 +249,4 @@ function deriveUserId(authorizationHeader) {
 }
 
 // --- Env Polyfill ---
-function Env(t, e) { class s { constructor(t) { this.env = t } } return new class { constructor(t) { this.name = t, this.logs = [], this.isSurge = !1, this.isQuanX = "undefined" != typeof $task, this.isLoon = !1 } getdata(t) { let e = this.getval(t); if (/^@/.test(t)) { const [, s, i] = /^@(.*?)\.(.*?)$/.exec(t), r = s ? this.getval(s) : ""; if (r) try { const t = JSON.parse(r); e = t ? this.getval(i, t) : null } catch (t) { e = "" } } return e } setdata(t, e) { let s = !1; if (/^@/.test(e)) { const [, i, r] = /^@(.*?)\.(.*?)$/.exec(e), o = this.getval(i), h = i ? "null" === o ? null : o || "{}" : "{}"; try { const e = JSON.parse(h); this.setval(r, t, e), s = !0, this.setval(i, JSON.stringify(e)) } catch (e) { const o = {}; this.setval(r, t, o), s = !0, this.setval(i, JSON.stringify(o)) } } else s = this.setval(t, e); return s } getval(t) { return this.isQuanX ? $prefs.valueForKey(t) : "" } setval(t, e) { return this.isQuanX ? $prefs.setValueForKey(t, e) : "" } msg(e = t, s = "", i = "", r) { this.isQuanX && $notify(e, s, i, r) } get(t, e = (() => { })) { this.isQuanX && ("string" == typeof t && (t = { url: t }), t.method = "GET", $task.fetch(t).then(t => { e(null, t, t.body) }, t => e(t.error, null, null))) } done(t = {}) { this.isQuanX && $done(t) } }(t, e) }
+function Env(t, e) { class s { constructor(t) { this.env = t } } return new class { constructor(t) { this.name = t, this.logs = [], this.isSurge = !1, this.isQuanX = "undefined" != typeof $task, this.isLoon = !1 } getdata(t) { let e = this.getval(t); if (/^@/.test(t)) { const [, s, i] = /^@(.*?)\.(.*?)$/.exec(t), r = s ? this.getval(s) : ""; if (r) try { const t = JSON.parse(r); e = t ? this.getval(i, t) : null } catch (t) { e = "" } } return e } setdata(t, e) { let s = !1; if (/^@/.test(e)) { const [, i, r] = /^@(.*?)\.(.*?)$/.exec(e), o = this.getval(i), h = i ? "null" === o ? null : o || "{}" : "{}"; try { const e = JSON.parse(h); this.setval(r, t, e), s = !0, this.setval(i, JSON.stringify(e)) } catch (e) { const o = {}; this.setval(r, t, o), s = !0, this.setval(i, JSON.stringify(o)) } } else s = this.setval(t, e); return s } getval(t) { return this.isQuanX ? $prefs.valueForKey(t) : "" } setval(t, e) { return this.isQuanX ? $prefs.setValueForKey(t, e) : "" } msg(e = t, s = "", i = "", r) { if (this.isQuanX) { if (typeof $notify === 'function') { $notify(e, s, i, r) } else { console.log(`[notify] ${e} | ${s} | ${i}`) } } } get(t, e = (() => { })) { this.isQuanX && ("string" == typeof t && (t = { url: t }), t.method = "GET", $task.fetch(t).then(t => { e(null, t, t.body) }, t => e(t.error, null, null))) } done(t = {}) { this.isQuanX && (typeof $done === 'function') && $done(t) } }(t, e) }

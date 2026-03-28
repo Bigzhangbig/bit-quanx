@@ -26,9 +26,18 @@ const scriptContent = fs.readFileSync(scriptPath, 'utf8');
 
 // 获取命令行参数中的 course_id
 const args = process.argv.slice(2);
-if (args.length > 0) {
-    global.DEKT_TARGET_IDS = args;
+const forceAllFromEnv = String(process.env.DEKT_FORCE_AUTO_SIGN_ALL || '').toLowerCase() === 'true'
+    || String(process.env.DEKT_FORCE_AUTO_SIGN_ALL || '') === '1';
+const forceAllFromArg = args.includes('--all') || args.includes('--auto-sign-all');
+const forceAll = forceAllFromEnv || forceAllFromArg;
+const targetIds = args.filter(a => !a.startsWith('--'));
+
+if (targetIds.length > 0) {
+    global.DEKT_TARGET_IDS = targetIds;
     console.log(`[Local Debug] 指定课程 ID: ${global.DEKT_TARGET_IDS.join(', ')}`);
+} else if (forceAll) {
+    console.log('[Local Debug] 未指定课程 ID，但已启用批量签到模式');
+    global.DEKT_BLOCK_LIST_MODE = false;
 } else {
     console.log(`[Local Debug] 未指定课程 ID，默认禁用批量签到 (防止误操作)`);
     global.DEKT_BLOCK_LIST_MODE = true;

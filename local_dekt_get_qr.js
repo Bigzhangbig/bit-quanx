@@ -15,7 +15,6 @@ const $ = new Env("获取二维码");
 // 配置
 const CONFIG = {
     tokenKey: "bit_sc_token",
-    headersKey: "bit_sc_headers",
     // 签到列表接口
     listUrl: "https://qcbldekt.bit.edu.cn/api/transcript/course/signIn/list?page=1&limit=20&type=1",
     infoUrl: "https://qcbldekt.bit.edu.cn/api/transcript/checkIn/info",
@@ -52,17 +51,10 @@ if (!fs.existsSync(CONFIG.saveDir)) {
         return;
     }
 
-    let headers = {};
-    try {
-        headers = JSON.parse($.getdata(CONFIG.headersKey) || "{}");
-    } catch (e) {
-        console.log("⚠️ Headers 解析失败，将只使用 Token");
-    }
-    
-    // 确保 headers 中有必要的字段
-    if (!headers["Authorization"] && token) {
-        headers["Authorization"] = token;
-    }
+    let headers = {
+        "Authorization": token,
+        "Content-Type": "application/json;charset=utf-8"
+    };
 
     const options = {
         url: CONFIG.listUrl,

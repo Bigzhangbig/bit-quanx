@@ -59,7 +59,9 @@
 *   **`local_dekt_my_activities.js`**: 本地运行我的活动脚本，验证时长字段获取逻辑。
     *   用法: `node local_dekt_my_activities.js`
 *   **`local_dekt_unenroll.js`**: 本地取消报名工具。
-    *   用法: `node local_dekt_unenroll.js [--course=451] [--user=9028711]`
+    *   用法: `node local_dekt_unenroll.js [--course=451]`
+*   **`local_dekt_signin_loop.js`**: 本地循环检测签到/签退工具，自动处理今天窗口内全部课程。
+    *   用法: `node local_dekt_signin_loop.js [--interval=60] [--max-loops=20]`
 *   **`local_sync_gist.js`**: 从 Gist 同步配置到本地 `.env`。
     *   用法: `node local_sync_gist.js`
 *   **`local_card_probe.js`**: 校园卡凭证探测工具，通过学工号获取 openid/JSESSIONID。

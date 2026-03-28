@@ -11,16 +11,26 @@
 
 // ====== 配置项 ======
 const $ = new Env("北理工第二课堂签到");
+
+// 统一时间戳日志工具
+function _nowTs() {
+    const d = new Date();
+    const pad = (n, w = 2) => String(n).padStart(w, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+}
+function log(...args) {
+    console.log(`[${_nowTs()}]`, ...args);
+}
+
 const CONFIG = {
     tokenKey: "bit_sc_token",
-    headersKey: "bit_sc_headers",
     autoSignAllKey: "bit_sc_auto_sign_all",
     runtimeIdsKey: "bit_sc_runtime_sign_ids",
-    listUrl: "https://qcbldekt.bit.edu.cn/api/transcript/course/signIn/list?page=1&limit=10&type=1",
+    listUrl: "https://qcbldekt.bit.edu.cn/api/transcript/course/signIn/list?page=1&limit=20&type=1",
     infoUrl: "https://qcbldekt.bit.edu.cn/api/transcript/checkIn/info",
     signInUrl: "https://qcbldekt.bit.edu.cn/api/transcript/signIn",
     courseInfoUrlRest: "https://qcbldekt.bit.edu.cn/api/course/info/",
-    myCourseListUrl: "https://qcbldekt.bit.edu.cn/api/course/list/my?page=1&limit=200"
+    myCourseListUrl: "https://qcbldekt.bit.edu.cn/api/course/list/my?page=1&limit=20"
 };
 
 // 栏目映射（与 dekt_my_activities.js 保持一致）
@@ -104,8 +114,7 @@ async function main() {
 // ====== 环境与配置读取 ======
 function getEnvConfig() {
     const token = $.getdata(CONFIG.tokenKey);
-    const savedHeadersStr = $.getdata(CONFIG.headersKey);
-    const headers = buildHeaders(savedHeadersStr, token);
+    const headers = buildHeaders(token);
     const autoSignAll = String($.getdata(CONFIG.autoSignAllKey) || "false").toLowerCase() === "true";
     const runtimeIdsStr = $.getdata(CONFIG.runtimeIdsKey) || "";
     let targetIds = runtimeIdsStr.split(/[,，\s]+/).map(s => s.trim()).filter(s => s);
@@ -119,8 +128,8 @@ function getEnvConfig() {
     return { token, headers, autoSignAll, targetIds };
 }
 
-// 构建请求 Headers（从保存字符串 + token 统一生成）
-function buildHeaders(savedHeadersStr, token) {
+// 构建请求 Headers（从token统一生成）
+function buildHeaders(token) {
     let headers = {};
     headers['Authorization'] = normalizeAuthToken(token);
     headers['Content-Type'] = 'application/json;charset=utf-8';
@@ -179,6 +188,7 @@ async function handleCourseList(courses, headers, autoSignAll) {
         if (typeof course.status !== 'undefined' && (course.status === 4 || course.status === '4')) continue;
         const info = await getCourseInfo(course.course_id, headers);
         if (!info) continue;
+        if (isSignOutExpired(info)) continue;
         const meta = await getCourseMeta(course.course_id, headers);
         if (meta && meta.completionType === 'time') {
             const safeTitle = course.course_title || info.course_title || String(course.course_id);
@@ -200,6 +210,7 @@ async function handleTargetIds(targetIds, headers) {
         // 若接口返回中包含状态，也参考 activities 逻辑过滤取消状态（改为精确匹配）
         if (info.status_label && String(info.status_label).trim() === "已取消") continue;
         if (typeof info.status !== 'undefined' && (info.status === 4 || info.status === '4')) continue;
+        if (isSignOutExpired(info)) continue;
         const meta = await getCourseMeta(tId, headers);
         if (meta && meta.completionType === 'time') {
             const safeTitle = await resolveCourseTitle(tId, info, headers);
@@ -463,6 +474,20 @@ function isInWindow(info, kind) {
     return false;
 }
 
+function parseTimeToMs(timeText) {
+    if (!timeText) return NaN;
+    const ts = new Date(String(timeText).replace(/-/g, '/')).getTime();
+    return Number.isFinite(ts) ? ts : NaN;
+}
+
+// 仅屏蔽“签退截止已过”的课程；没有签退截止时间时不做屏蔽。
+function isSignOutExpired(info) {
+    if (!info || !info.sign_out_end_time) return false;
+    const signOutEndMs = parseTimeToMs(info.sign_out_end_time);
+    if (!Number.isFinite(signOutEndMs)) return false;
+    return Date.now() > signOutEndMs;
+}
+
 // 生成范围内随机坐标
 function getRandomCoordinate(lat, lon, rangeMeters) {
     // 1度纬度 ≈ 111km = 111000m
@@ -565,7 +590,14 @@ function Env(t, e) {
             return this.isQuanX ? $prefs.setValueForKey(t, e) : ""
         }
         msg(e = t, s = "", i = "", r) {
-            this.isQuanX && $notify(e, s, i, r)
+            if (this.isQuanX) {
+                // Quantumult X: $notify(title, subtitle, body, options)
+                if (typeof $notify === 'function') {
+                    $notify(e, s, i, r)
+                } else {
+                    console.log(`[notify] ${e} | ${s} | ${i}`)
+                }
+            }
         }
         get(t, e = (() => {})) {
             this.isQuanX && ("string" == typeof t && (t = {
@@ -582,7 +614,7 @@ function Env(t, e) {
             }, t => e(t.error, null, null)))
         }
         done(t = {}) {
-            this.isQuanX && $done(t)
+            this.isQuanX && (typeof $done === 'function') && $done(t)
         }
     }(t, e)
 }

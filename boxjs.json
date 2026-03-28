@@ -18,7 +18,6 @@
       "id": "bit_dekt",
       "name": "北理工第二课堂",
       "keys": [
-        "bit_sc_headers",
         "bit_sc_cache",
         "bit_sc_unenroll_course_id",
         "bit_sc_blacklist",

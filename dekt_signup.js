@@ -14,8 +14,6 @@ console.log("加载脚本: 北理工第二课堂-自动报名");
 const CONFIG = {
     // BoxJS Keys
     tokenKey: "bit_sc_token",
-    headersKey: "bit_sc_headers",
-    userIdKey: "bit_sc_user_id", // 用户ID Key
     signupListKey: "bit_sc_signup_list", // 待报名列表 Key
     notifyNoUpdateKey: "bit_sc_notify_no_update", // 无更新通知开关
     lastSignupKey: "bit_sc_last_signup", // 最后成功报名课程 Key (存为 JSON 对象 {id,title,time,user_id})
@@ -35,7 +33,12 @@ const CONFIG = {
 };
 
 const LOG_PREFIX = '[DEKT]';
-function log(msg) { console.log(`${LOG_PREFIX} ${msg}`); }
+function _nowTs() {
+    const d = new Date();
+    const pad = (n, w = 2) => String(n).padStart(w, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+}
+function log(msg) { console.log(`[${_nowTs()}] ${LOG_PREFIX} ${msg}`); }
 
 /**
  * 动态获取微信小程序跳转链接
@@ -78,7 +81,6 @@ function normalizeAuthToken(token) {
 
 async function main() {
     const token = $.getdata(CONFIG.tokenKey);
-    const userId = $.getdata(CONFIG.userIdKey) || deriveUserId(token);
     const isNotifyNoUpdate = $.getdata(CONFIG.notifyNoUpdateKey) === "true";
     let hasNotified = false;
     
@@ -112,6 +114,9 @@ async function main() {
     const headers = {};
     headers['Authorization'] = authToken;
     headers['Content-Type'] = 'application/json;charset=utf-8';
+
+    // user_id 仅通过 token 对应的用户信息接口获取，不读取手动配置。
+    const userId = await getUserIdFromApi(headers);
 
     // 1. 获取待报名列表
     let signupList = [];
@@ -396,15 +401,17 @@ function computeCourseInfoMessage(courseInfo, title, courseId) {
     return { statusMsg: statusLabel, subMsg };
 }
 
-function deriveUserId(authorizationHeader) {
+async function getUserIdFromApi(headers) {
     try {
-        if (!authorizationHeader) return "";
-        // 支持 "Bearer 611156|xxxx" 或 "611156|xxxx"
-        let raw = String(authorizationHeader).trim();
-        if (raw.toLowerCase().startsWith("bearer ")) raw = raw.slice(7).trim();
-        const first = raw.split("|")[0].trim();
-        return /^\d+$/.test(first) ? first : "";
-    } catch (_) { return ""; }
+        const auth = headers && headers.Authorization ? headers.Authorization : "";
+        if (!auth) return "";
+        const r = await httpGet("https://qcbldekt.bit.edu.cn/api/user/info", { Authorization: auth });
+        if (r && r.code === 200 && r.data && r.data.id != null) return String(r.data.id);
+        if (r && r.id != null) return String(r.id);
+    } catch (e) {
+        log(`获取 user_id 失败: ${e}`);
+    }
+    return "";
 }
 
 // Env Polyfill
@@ -452,7 +459,13 @@ function Env(t, e) {
             return this.isQuanX ? $prefs.setValueForKey(t, e) : ""
         }
         msg(e = t, s = "", i = "", r) {
-            this.isQuanX && $notify(e, s, i, r)
+            if (this.isQuanX) {
+                if (typeof $notify === 'function') {
+                    $notify(e, s, i, r)
+                } else {
+                    console.log(`[notify] ${e} | ${s} | ${i}`)
+                }
+            }
         }
         get(t, e = (() => {})) {
             this.isQuanX && ("string" == typeof t && (t = {

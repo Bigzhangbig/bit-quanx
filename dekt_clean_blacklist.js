@@ -8,10 +8,30 @@
 
 const $ = new Env("北理工第二课堂-清理黑名单");
 
+// 统一时间戳日志工具
+function _nowTs() {
+    const d = new Date();
+    const pad = (n, w = 2) => String(n).padStart(w, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+}
+function log(...args) {
+    console.log(`[${_nowTs()}]`, ...args);
+}
+
+// 统一通知函数：支持 debug 模式和微信链接
+function notify(title, subtitle = "", body = "", options = {}) {
+    const isDebug = String($.getdata('bit_sc_debug') || 'false').toLowerCase() === 'true';
+    if (isDebug) {
+        log(`[NOTIFY] ${title} | ${subtitle} | ${body}`);
+    } else {
+        $.msg(title, subtitle, body, options);
+    }
+}
+
 const CONFIG = {
     blacklistKey: "bit_sc_blacklist",
     tokenKey: "bit_sc_token",
-    headersKey: "bit_sc_headers"
+    debugKey: "bit_sc_debug"
 };
 
 (async () => {
@@ -19,7 +39,7 @@ const CONFIG = {
         const token = $.getdata(CONFIG.tokenKey);
         const authHeader = normalizeAuthToken(token);
         if (!authHeader) {
-            $.msg($.name, "未获取到有效Token", "请先运行cookie脚本获取Token");
+            notify($.name, "未获取到有效Token", "请先运行cookie脚本获取Token", { force: true });
             $done();
             return;
         }
@@ -41,7 +61,7 @@ const CONFIG = {
         }
 
         if (blacklist.length === 0) {
-            $.msg($.name, "黑名单为空", "无需清理");
+            notify($.name, "黑名单为空", "无需清理");
             $done();
             return;
         }
@@ -107,9 +127,9 @@ const CONFIG = {
         let body = `剩余ID: ${remaining.join(",") || "无"}`;
         if (removed.length > 0) body += `\n已移除(ID 状态为已结束/已取消): ${removed.join(",")}`;
         if (unknownRemoved.length > 0) body += `\n已移除(未知，无法确认状态): ${unknownRemoved.join(",")}`;
-        $.msg($.name, "黑名单已清理", body);
+        notify($.name, "黑名单已清理", body);
     } catch (e) {
-        $.msg($.name, "脚本异常", String(e));
+        notify($.name, "脚本异常", String(e), { force: true });
     }
     $done();
 })();
@@ -227,4 +247,4 @@ async function getCourseListAll(authHeader) {
 }
 
 // --- Env Polyfill ---
-function Env(t, e) { class s { constructor(t) { this.env = t } } return new class { constructor(t) { this.name = t, this.logs = [], this.isSurge = !1, this.isQuanX = "undefined" != typeof $task, this.isLoon = !1 } getdata(t) { let e = this.getval(t); if (/^@/.test(t)) { const [, s, i] = /^@(.*?)\.(.*?)$/.exec(t), r = s ? this.getval(s) : ""; if (r) try { const t = JSON.parse(r); e = t ? this.getval(i, t) : null } catch (t) { e = "" } } return e } setdata(t, e) { let s = !1; if (/^@/.test(e)) { const [, i, r] = /^@(.*?)\.(.*?)$/.exec(e), o = this.getval(i), h = i ? "null" === o ? null : o || "{}" : "{}"; try { const e = JSON.parse(h); this.setval(r, t, e), s = !0, this.setval(i, JSON.stringify(e)) } catch (e) { const o = {}; this.setval(r, t, o), s = !0, this.setval(i, JSON.stringify(o)) } } else s = this.setval(t, e); return s } getval(t) { return this.isQuanX ? $prefs.valueForKey(t) : "" } setval(t, e) { return this.isQuanX ? $prefs.setValueForKey(t, e) : "" } msg(e = t, s = "", i = "", r) { this.isQuanX && $notify(e, s, i, r) } get(t, e = (() => { })) { this.isQuanX && ("string" == typeof t && (t = { url: t }), t.method = "GET", $task.fetch(t).then(t => { e(null, t, t.body) }, t => e(t.error, null, null))) } done(t = {}) { this.isQuanX && $done(t) } }(t, e) }
+function Env(t, e) { class s { constructor(t) { this.env = t } } return new class { constructor(t) { this.name = t, this.logs = [], this.isSurge = !1, this.isQuanX = "undefined" != typeof $task, this.isLoon = !1 } getdata(t) { let e = this.getval(t); if (/^@/.test(t)) { const [, s, i] = /^@(.*?)\.(.*?)$/.exec(t), r = s ? this.getval(s) : ""; if (r) try { const t = JSON.parse(r); e = t ? this.getval(i, t) : null } catch (t) { e = "" } } return e } setdata(t, e) { let s = !1; if (/^@/.test(e)) { const [, i, r] = /^@(.*?)\.(.*?)$/.exec(e), o = this.getval(i), h = i ? "null" === o ? null : o || "{}" : "{}"; try { const e = JSON.parse(h); this.setval(r, t, e), s = !0, this.setval(i, JSON.stringify(e)) } catch (e) { const o = {}; this.setval(r, t, o), s = !0, this.setval(i, JSON.stringify(o)) } } else s = this.setval(t, e); return s } getval(t) { return this.isQuanX ? $prefs.valueForKey(t) : "" } setval(t, e) { return this.isQuanX ? $prefs.setValueForKey(t, e) : "" } msg(e = t, s = "", i = "", r) { if (this.isQuanX) { if (typeof $notify === 'function') { $notify(e, s, i, r) } else { console.log(`[notify] ${e} | ${s} | ${i}`) } } } get(t, e = (() => { })) { this.isQuanX && ("string" == typeof t && (t = { url: t }), t.method = "GET", $task.fetch(t).then(t => { e(null, t, t.body) }, t => e(t.error, null, null))) } done(t = {}) { this.isQuanX && (typeof $done === 'function') && $done(t) } }(t, e) }

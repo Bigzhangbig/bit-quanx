@@ -4,12 +4,9 @@
  * 用法：
  *   1) 在项目根目录创建 .env，至少包含：
  *        bit_sc_token=Bearer xxxxx
- *        dekt_user_id=9028711           # 或 bit_sc_user_id
  *        dekt_course_id=451             # 或 bit_sc_unenroll_course_id / DEKT_COURSE_ID（可选，留空则使用最后成功报名的课程）
- *      可选：
- *        bit_sc_headers={"User-Agent":"...","Referer":"...","Host":"qcbldekt.bit.edu.cn"}
  *   2) 运行：
- *        node local_dekt_unenroll.js [--course=451] [--user=9028711]
+ *        node local_dekt_unenroll.js [--course=451]
  */
 const fs = require('fs');
 const path = require('path');
@@ -41,27 +38,9 @@ for (const a of args) {
     $.setdata(String(argMap.course), 'DEKT_COURSE_ID');
     console.log(`[LocalSeed] 写入课程ID: ${argMap.course}`);
   }
-  if (argMap.user) {
-    $.setdata(String(argMap.user), 'dekt_user_id');
-    $.setdata(String(argMap.user), 'bit_sc_user_id');
-    $.setdata(String(argMap.user), 'DEKT_USER_ID');
-    console.log(`[LocalSeed] 写入用户ID: ${argMap.user}`);
-  }
   if (argMap.token) {
     $.setdata(String(argMap.token), 'bit_sc_token');
     console.log(`[LocalSeed] 写入Token`);
-  }
-  if (argMap.headers) {
-    try {
-      // 支持传入 JSON 字符串
-      const obj = JSON.parse(argMap.headers);
-      $.setdata(JSON.stringify(obj), 'bit_sc_headers');
-      console.log(`[LocalSeed] 写入Headers(JSON)`);
-    } catch (_) {
-      // 直接原样写入
-      $.setdata(String(argMap.headers), 'bit_sc_headers');
-      console.log(`[LocalSeed] 写入Headers(原样)`);
-    }
   }
 })();
 

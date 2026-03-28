@@ -11,9 +11,7 @@
  * BoxJS 配置项：
  * - bit_sc_unenroll_course_id / dekt_course_id / DEKT_COURSE_ID：取消报名课程ID（可选，留空则使用最后成功报名的课程）
  * - bit_sc_last_signup：最后成功报名的课程对象（自动记录，格式 {id,title,time}）
- * - bit_sc_user_id / dekt_user_id / DEKT_USER_ID：用户ID
  * - bit_sc_token / dekt_token：认证Token
- * - bit_sc_headers / dekt_headers：请求Headers（可选）
  * 
  * [task_local]
  * # 取消报名 (手动运行)
@@ -31,7 +29,6 @@ const DEBUG = String($.getdata('bit_sc_debug') || $.getdata('DEKT_DEBUG') || 'fa
 function debugLog(...args) { if (DEBUG) console.log(...args); }
 const KEY_COURSE_IDS = ["bit_sc_unenroll_course_id", "dekt_unenroll_course_id", "dekt_course_id", "DEKT_COURSE_ID"];
 const KEY_LAST_SIGNUP = "bit_sc_last_signup"; // 最后成功报名课程 Key (JSON 对象)
-const KEY_HEADERS = ["bit_sc_headers", "dekt_headers", "DEKT_HEADERS"];
 const KEY_TOKENS = ["bit_sc_token", "dekt_token", "DEKT_TOKEN"];
 const KEY_BLACKLIST = "bit_sc_blacklist"; // 黑名单 Key
 
@@ -64,23 +61,16 @@ async function main() {
       }
     }
 
-    let headers = tryParseJSON(getFirstPref(KEY_HEADERS)) || {};
     const token = getFirstPref(KEY_TOKENS);
-    headers = normalizeHeaders(headers, token);
+    let headers = normalizeHeaders(null, token);
 
-    // 用户ID来源优先级：显式偏好 > 备用键 > 不解析 token 前缀（避免错误）
-    const explicitUserId = getFirstPref(["bit_sc_user_id", "dekt_user_id", "DEKT_USER_ID", "DEKT_FORCE_USER_ID", "user_id"]);
-    const derivedUserId = deriveUserId(token); // 可能不准确，作为低优先级候选
-    let userId = explicitUserId || "";
-    console.log(`[unenroll] courseId=${courseId}, explicitUserId=${explicitUserId || '(none)'}, derivedUserId=${derivedUserId || '(none)'}`);
-    if (!userId && derivedUserId) {
-      userId = derivedUserId; // 仅在没有显式值时使用
-    }
-    console.log(`[unenroll] final userId candidate=${userId || '(empty will try without user_id first)'}`);
+    // user_id 仅从 token 对应的用户信息接口获取，避免手动填写错误。
+    const userId = await getUserIdFromApi(headers);
+    console.log(`[unenroll] courseId=${courseId}, tokenUserId=${userId || '(none)'}`);
     console.log(`[unenroll] headers.Authorization=${headers.Authorization ? 'Bearer *' : 'none'}`);
-    // 严格按照抓包，要求提供 user_id
+    // 严格按照抓包，取消报名必须提供 user_id。
     if (!userId) {
-      const err = "缺少 user_id，请在 BoxJS 设置 dekt_user_id/bit_sc_user_id（或 DEKT_FORCE_USER_ID）";
+      const err = "无法通过 token 获取 user_id，请确认 token 有效并可访问 /api/user/info";
       const subTitle = courseTitle ? `课程: ${courseTitle} (ID: ${courseId})` : `课程ID: ${courseId}`;
       notify("第二课堂取消报名", subTitle, err);
       console.log(`[unenroll] 终止：${err}`);
@@ -332,15 +322,6 @@ function done(reason) {
   $.done({ ret: reason ? false : true, msg: reason || "OK" });
 }
 
-function deriveUserId(token) {
-  // 原逻辑：从 token 前缀解析；但抓包示例显示 token 前缀可能不是 user_id。
-  // 保留此函数，仅作为低优先级候选，不再强制使用。
-  if (!token) return "";
-  const part = String(token).split("|")[0];
-  if (/^(\d+)$/.test(part)) return part;
-  return "";
-}
-
 function toInt(v) {
   const n = parseInt(String(v), 10);
   return Number.isFinite(n) ? n : undefined;
@@ -386,4 +367,4 @@ function addToBlacklist(courseId) {
 }
 
 // Env Polyfill（与 activities 保持一致，支持 QuanX）
-function Env(t, e) { class s { constructor(t) { this.env = t } } return new class { constructor(t) { this.name = t, this.logs = [], this.isSurge = !1, this.isQuanX = "undefined" != typeof $task, this.isLoon = !1 } getdata(t) { let e = this.getval(t); if (/^@/.test(t)) { const [, s, i] = /^@(.*?)\.(.*?)$/.exec(t), r = s ? this.getval(s) : ""; if (r) try { const t = JSON.parse(r); e = t ? this.getval(i, t) : null } catch (t) { e = "" } } return e } setdata(t, e) { let s = !1; if (/^@/.test(e)) { const [, i, r] = /^@(.*?)\.(.*?)$/.exec(e), o = this.getval(i), h = i ? "null" === o ? null : o || "{}" : "{}"; try { const e = JSON.parse(h); this.setval(r, t, e), s = !0, this.setval(i, JSON.stringify(e)) } catch (e) { const o = {}; this.setval(r, t, o), s = !0, this.setval(i, JSON.stringify(o)) } } else s = this.setval(t, e); return s } getval(t) { return this.isQuanX ? $prefs.valueForKey(t) : "" } setval(t, e) { return this.isQuanX ? $prefs.setValueForKey(t, e) : "" } msg(e = t, s = "", i = "", r) { this.isQuanX && $notify(e, s, i, r) } get(t, e = (() => { })) { this.isQuanX && ("string" == typeof t && (t = { url: t }), t.method = "GET", $task.fetch(t).then(t => { e(null, t, t.body) }, t => e(t.error, null, null))) } post(t, e = (() => { })) { this.isQuanX && ("string" == typeof t && (t = { url: t }), t.method = "POST", $task.fetch(t).then(t => { e(null, t, t.body) }, t => e(t.error, null, null))) } done(t = {}) { this.isQuanX && $done(t) } }(t, e) }
+function Env(t, e) { class s { constructor(t) { this.env = t } } return new class { constructor(t) { this.name = t, this.logs = [], this.isSurge = !1, this.isQuanX = "undefined" != typeof $task, this.isLoon = !1 } getdata(t) { let e = this.getval(t); if (/^@/.test(t)) { const [, s, i] = /^@(.*?)\.(.*?)$/.exec(t), r = s ? this.getval(s) : ""; if (r) try { const t = JSON.parse(r); e = t ? this.getval(i, t) : null } catch (t) { e = "" } } return e } setdata(t, e) { let s = !1; if (/^@/.test(e)) { const [, i, r] = /^@(.*?)\.(.*?)$/.exec(e), o = this.getval(i), h = i ? "null" === o ? null : o || "{}" : "{}"; try { const e = JSON.parse(h); this.setval(r, t, e), s = !0, this.setval(i, JSON.stringify(e)) } catch (e) { const o = {}; this.setval(r, t, o), s = !0, this.setval(i, JSON.stringify(o)) } } else s = this.setval(t, e); return s } getval(t) { return this.isQuanX ? $prefs.valueForKey(t) : "" } setval(t, e) { return this.isQuanX ? $prefs.setValueForKey(t, e) : "" } msg(e = t, s = "", i = "", r) { if (this.isQuanX) { if (typeof $notify === 'function') { $notify(e, s, i, r) } else { console.log(`[notify] ${e} | ${s} | ${i}`) } } } get(t, e = (() => { })) { this.isQuanX && ("string" == typeof t && (t = { url: t }), t.method = "GET", $task.fetch(t).then(t => { e(null, t, t.body) }, t => e(t.error, null, null))) } post(t, e = (() => { })) { this.isQuanX && ("string" == typeof t && (t = { url: t }), t.method = "POST", $task.fetch(t).then(t => { e(null, t, t.body) }, t => e(t.error, null, null))) } done(t = {}) { this.isQuanX && (typeof $done === 'function') && $done(t) } }(t, e) }

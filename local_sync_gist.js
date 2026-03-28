@@ -84,15 +84,6 @@ async function syncFromGist() {
                             console.log("ℹ️ Token is up to date");
                         }
 
-                        if (content.headers) {
-                            const newHeaders = JSON.stringify(content.headers);
-                            if (newHeaders !== envData.bit_sc_headers) {
-                                envData.bit_sc_headers = newHeaders;
-                                console.log("✅ Headers updated from Gist");
-                                updated = true;
-                            }
-                        }
-
                         // 同步 user_id 到 .env，供取消报名等脚本使用
                         if (typeof content.user_id !== 'undefined' && content.user_id !== envData.bit_sc_user_id) {
                             envData.bit_sc_user_id = String(content.user_id);

@@ -9,14 +9,22 @@
 
 const $ = new Env("北理工第二课堂");
 
-console.log("加载脚本: 北理工第二课堂监控 (v20251202)");
+// 统一时间戳日志工具
+function _nowTs() {
+    const d = new Date();
+    const pad = (n, w = 2) => String(n).padStart(w, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+}
+function log(...args) {
+    console.log(`[${_nowTs()}]`, ...args);
+}
+
+log("加载脚本: 北理工第二课堂监控");
 
 // 配置项
 const CONFIG = {
     // BoxJS/Store Keys
     tokenKey: "bit_sc_token",
-    headersKey: "bit_sc_headers",
-    userIdKey: "bit_sc_user_id", // 用户ID Key
     cacheKey: "bit_sc_cache", // 用来存上一次的最新课程ID
     debugKey: "bit_sc_debug", // 调试模式开关
     pickupKey: "bit_sc_pickup_mode", // 捡漏模式开关
@@ -60,8 +68,6 @@ const CONFIG = {
 // 监控逻辑 (运行在 Task 模式)
 async function checkCourses() {
     const token = $.getdata(CONFIG.tokenKey);
-    const savedHeaders = $.getdata(CONFIG.headersKey);
-    const userId = $.getdata(CONFIG.userIdKey) || deriveUserId(token);
     const isDebug = $.getdata(CONFIG.debugKey) === "true";
     const isPickupMode = $.getdata(CONFIG.pickupKey) === "true";
     const isNotifyNoUpdate = $.getdata(CONFIG.notifyNoUpdateKey) === "true";
@@ -158,6 +164,9 @@ async function checkCourses() {
         $done();
         return;
     }
+
+    // user_id 仅通过 token 对应的用户信息接口获取，不读取手动配置。
+    const userId = await getUserIdFromApi(headers);
 
 
 function normalizeAuthToken(token) {
@@ -626,6 +635,27 @@ function httpPost(options) {
     });
 }
 
+function parseDurationMinutes(value) {
+    if (value == null) return null;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    const text = String(value).trim();
+    if (!text) return null;
+
+    if (/^\d+(?:\.\d+)?$/.test(text)) {
+        const n = Number(text);
+        return Number.isFinite(n) ? Math.round(n) : null;
+    }
+
+    const hourMatch = text.match(/(\d+(?:\.\d+)?)\s*小时/);
+    const minuteMatch = text.match(/(\d+(?:\.\d+)?)\s*分钟/);
+    if (!hourMatch && !minuteMatch) return null;
+
+    const hours = hourMatch ? Number(hourMatch[1]) : 0;
+    const minutes = minuteMatch ? Number(minuteMatch[1]) : 0;
+    const total = hours * 60 + minutes;
+    return Number.isFinite(total) ? Math.round(total) : null;
+}
+
 // 提取课程时长（分钟）：仅当完成标志为 time 时返回数字
 function getDurationIfTime(course) {
     try {
@@ -633,13 +663,12 @@ function getDurationIfTime(course) {
         const typeFlag = course && course.transcript_index_type && course.transcript_index_type.completion_flag;
         if (flag === 'time' || typeFlag === 'time') {
             let d = null;
-            if (course && course.duration != null) d = parseInt(course.duration, 10);
+            if (course && course.duration != null) d = parseDurationMinutes(course.duration);
             if ((d == null || Number.isNaN(d)) && course && course.transcript_index_type && course.transcript_index_type.duration != null) {
-                d = parseInt(course.transcript_index_type.duration, 10);
+                d = parseDurationMinutes(course.transcript_index_type.duration);
             }
             if ((d == null || Number.isNaN(d)) && course && typeof course.completion_flag_text === 'string') {
-                const m = course.completion_flag_text.match(/(\d{1,3})\s*分钟/);
-                if (m) d = parseInt(m[1], 10);
+                d = parseDurationMinutes(course.completion_flag_text);
             }
             return Number.isNaN(d) ? null : d;
         }
@@ -657,13 +686,12 @@ async function getDurationByIdIfTime(courseId, headers) {
         const flag = data.completion_flag || (data.transcript_index_type && data.transcript_index_type.completion_flag);
         if (flag !== 'time') return null;
         let d = null;
-        if (data.duration != null) d = parseInt(data.duration, 10);
+        if (data.duration != null) d = parseDurationMinutes(data.duration);
         if ((d == null || Number.isNaN(d)) && data.transcript_index_type && data.transcript_index_type.duration != null) {
-            d = parseInt(data.transcript_index_type.duration, 10);
+            d = parseDurationMinutes(data.transcript_index_type.duration);
         }
         if ((d == null || Number.isNaN(d)) && typeof data.completion_flag_text === 'string') {
-            const m = data.completion_flag_text.match(/(\d{1,3})\s*分钟/);
-            if (m) d = parseInt(m[1], 10);
+            d = parseDurationMinutes(data.completion_flag_text);
         }
         return Number.isNaN(d) ? null : d;
     } catch (e) {
@@ -699,15 +727,17 @@ async function getWechatJumpLink(pagePath = '/pages/index/index') {
     }
 }
 
-function deriveUserId(authorizationHeader) {
+async function getUserIdFromApi(headers) {
     try {
-        if (!authorizationHeader) return "";
-        // 支持 "Bearer 611156|xxxx" 或 "611156|xxxx"
-        let raw = String(authorizationHeader).trim();
-        if (raw.toLowerCase().startsWith("bearer ")) raw = raw.slice(7).trim();
-        const first = raw.split("|")[0].trim();
-        return /^\d+$/.test(first) ? first : "";
-    } catch (_) { return ""; }
+        const auth = headers && headers.Authorization ? headers.Authorization : "";
+        if (!auth) return "";
+        const r = await httpGet("https://qcbldekt.bit.edu.cn/api/user/info", { Authorization: auth });
+        if (r && r.code === 200 && r.data && r.data.id != null) return String(r.data.id);
+        if (r && r.id != null) return String(r.id);
+    } catch (e) {
+        console.log(`[monitor] 获取 user_id 失败: ${e}`);
+    }
+    return "";
 }
 
 // 将课程ID添加到黑名单（本文件局部实现，使用 CONFIG.blacklistKey）
@@ -789,7 +819,13 @@ function Env(t, e) {
             return this.isQuanX ? $prefs.setValueForKey(t, e) : ""
         }
         msg(e = t, s = "", i = "", r) {
-            this.isQuanX && $notify(e, s, i, r)
+            if (this.isQuanX) {
+                if (typeof $notify === 'function') {
+                    $notify(e, s, i, r)
+                } else {
+                    console.log(`[notify] ${e} | ${s} | ${i}`)
+                }
+            }
         }
         get(t, e = (() => {})) {
             this.isQuanX && ("string" == typeof t && (t = {
@@ -806,7 +842,7 @@ function Env(t, e) {
             }, t => e(t.error, null, null)))
         }
         done(t = {}) {
-            this.isQuanX && $done(t)
+            this.isQuanX && (typeof $done === 'function') && $done(t)
         }
     }(t, e)
 }

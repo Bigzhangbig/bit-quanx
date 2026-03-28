@@ -118,7 +118,12 @@ async function checkActivities() {
         const items = await getMyCourseList(headers);
         if (Array.isArray(items)) {
             log(`[checkActivities] 使用主接口 ${CONFIG.listUrl}，拿到 ${items.length} 条我的课程`);
-            return await processItems(items, headers);
+            const result = await processItems(items, headers, openUrl);
+            
+            // 在脚本最后打印今天有签到/签退的课程
+            await logTodaySchedule(items);
+            
+            return result;
         }
         log("获取列表失败或列表为空");
     } catch (error) {
@@ -253,6 +258,27 @@ async function getMyCourseList(headers) {
 // 1) checkIn/info 获取签到与签退时间段
 // 2) course/info 获取 duration/transcript 等元数据
 // 3) 若仍缺失 duration，再从 course/list/my 兜底补齐
+function parseDurationMinutes(value) {
+    if (value == null) return null;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    const text = String(value).trim();
+    if (!text) return null;
+
+    if (/^\d+(?:\.\d+)?$/.test(text)) {
+        const n = Number(text);
+        return Number.isFinite(n) ? Math.round(n) : null;
+    }
+
+    const hourMatch = text.match(/(\d+(?:\.\d+)?)\s*小时/);
+    const minuteMatch = text.match(/(\d+(?:\.\d+)?)\s*分钟/);
+    if (!hourMatch && !minuteMatch) return null;
+
+    const hours = hourMatch ? Number(hourMatch[1]) : 0;
+    const minutes = minuteMatch ? Number(minuteMatch[1]) : 0;
+    const total = hours * 60 + minutes;
+    return Number.isFinite(total) ? Math.round(total) : null;
+}
+
 async function getCourseInfo(courseId, headers) {
     const result = { _source: {} };
 
@@ -304,9 +330,9 @@ async function getCourseInfo(courseId, headers) {
                 result.duration = result.transcript_index_type.duration;
                 result._source.duration = 'transcript_index_type.duration';
             } else if (result.completion_flag_text) {
-                const m = String(result.completion_flag_text).match(/(\d{1,3})\s*分钟/);
-                if (m) {
-                    result.duration = parseInt(m[1], 10);
+                const parsed = parseDurationMinutes(result.completion_flag_text);
+                if (parsed != null) {
+                    result.duration = parsed;
                     result._source.duration = 'completion_flag_text';
                 }
             }
@@ -318,23 +344,30 @@ async function getCourseInfo(courseId, headers) {
     return result;
 }
 
-async function processItems(items, headers) {
+async function processItems(items, headers, openUrl) {
     const now = Date.now();
     let notifyItems = [];
     // 收集需要处理的任务（过滤并去重），再并发拉取详情（并发上限）
     const tasks = [];
     for (const item of items) {
-        const statusLabel = getStatusLabel(item);
         // 去除已取消的课程（精确匹配 '已取消' 或 status 为 4）
+        const statusLabel = getStatusLabel(item);
         if (statusLabel === "已取消") continue;
         if (typeof item.status !== 'undefined' && (item.status === 4 || item.status === '4')) continue;
 
-        const isSignIn = statusLabel === "待签到";
-        const isSignOut = statusLabel === "待签退";
-        if (!(isSignIn || isSignOut)) continue;
+        // 判断是否有签到/签退时间字段（表示这是一个允许签到/签退的课程）
+        // 优先使用列表中的状态，但也兼容没有详细状态的情况
+        const hasSignInTime = !!(item.sign_in_start_time || item.sign_in_end_time);
+        const hasSignOutTime = !!(item.sign_out_start_time || item.sign_out_end_time);
+        
+        if (!(hasSignInTime || hasSignOutTime)) {
+            // 如果列表中完全没有签到/签退时间，跳过
+            continue;
+        }
 
-        // 先按状态入队，具体时间窗在详情阶段用 course/info 再校验，避免列表字段缺失造成漏掉活动
-        tasks.push({ item, isSignIn, statusLabel });
+        // 进入详情查询，由详情接口决定是否真的需要签到/签退
+        // isSignIn/isSignOut 在详情中重新判断
+        tasks.push({ item, statusLabel });
     }
 
     if (tasks.length === 0) {
@@ -368,7 +401,6 @@ async function processItems(items, headers) {
     // mapper: 拉取单个课程的完整 notifyItem（或 null）
     const mapper = async (task) => {
         const item = task.item;
-        const isSignIn = task.isSignIn;
         const statusLabel = task.statusLabel;
         const id = item.course_id || item.id;
         const title = item.course_title || item.title || `课程${id || ''}`;
@@ -392,19 +424,59 @@ async function processItems(items, headers) {
         const signInEnd = (info && info.sign_in_end_time) || item.sign_in_end_time;
         const signOutStart = (info && info.sign_out_start_time) || item.sign_out_start_time;
         const signOutEnd = (info && info.sign_out_end_time) || item.sign_out_end_time;
-        const deadlineRaw = isSignIn ? signInEnd : signOutEnd;
 
-        if (!deadlineRaw) {
-            log(`[courseInfo] 跳过 id=${id}：未拿到${isSignIn ? '签到' : '签退'}截止时间`);
+        // 根据当前时间判断处于哪个窗口（签到还是签退）
+        let isSignIn = false;
+        let isSignOut = false;
+        let actionDeadline = null;
+        
+        if (signInStart && signInEnd) {
+            const siStart = new Date(String(signInStart).replace(/-/g, '/')).getTime();
+            const siEnd = new Date(String(signInEnd).replace(/-/g, '/')).getTime();
+            if (now >= siStart && now <= siEnd) {
+                isSignIn = true;
+                actionDeadline = signInEnd;
+                log(`[courseInfo] id=${id} 处于签到窗口: ${signInStart} ~ ${signInEnd}`);
+            }
+        }
+        
+        if (!isSignIn && signOutStart && signOutEnd) {
+            const soStart = new Date(String(signOutStart).replace(/-/g, '/')).getTime();
+            const soEnd = new Date(String(signOutEnd).replace(/-/g, '/')).getTime();
+            if (now >= soStart && now <= soEnd) {
+                isSignOut = true;
+                actionDeadline = signOutEnd;
+                log(`[courseInfo] id=${id} 处于签退窗口: ${signOutStart} ~ ${signOutEnd}`);
+            }
+        }
+
+        // 如果既不在签到窗口也不在签退窗口，则检查是否即将开始（30分钟内）
+        if (!isSignIn && !isSignOut) {
+            const lookAheadMs = 30 * 60 * 1000; // 30分钟
+            if (signInStart) {
+                const siStart = new Date(String(signInStart).replace(/-/g, '/')).getTime();
+                if (now < siStart && (siStart - now) <= lookAheadMs) {
+                    // 签到即将开始，但现在不在窗口，跳过并等待
+                    log(`[courseInfo] 跳过 id=${id}：签到窗口即将开始 ${signInStart}`);
+                    return null;
+                }
+            }
+            log(`[courseInfo] 跳过 id=${id}：不在签到/签退窗口`);
             return null;
         }
-        const deadlineTs = new Date(String(deadlineRaw).replace(/-/g, '/')).getTime();
+
+        if (!actionDeadline) {
+            log(`[courseInfo] 跳过 id=${id}：无截止时间`);
+            return null;
+        }
+        
+        const deadlineTs = new Date(String(actionDeadline).replace(/-/g, '/')).getTime();
         if (!Number.isFinite(deadlineTs)) {
-            log(`[courseInfo] 跳过 id=${id}：截止时间无法解析 ${deadlineRaw}`);
+            log(`[courseInfo] 跳过 id=${id}：截止时间无法解析 ${actionDeadline}`);
             return null;
         }
         if (now >= deadlineTs) {
-            log(`[courseInfo] 跳过 id=${id}：已过截止时间 ${deadlineRaw}`);
+            log(`[courseInfo] 跳过 id=${id}：已过截止时间 ${actionDeadline}`);
             return null;
         }
 
@@ -424,15 +496,14 @@ async function processItems(items, headers) {
         else if (item && item.duration != null) duration = item.duration;
         else if (info && info.transcript_index_type && info.transcript_index_type.duration != null) duration = info.transcript_index_type.duration;
         else if (info && info.completion_flag_text) {
-            const m = String(info.completion_flag_text).match(/(\d{1,3})\s*分钟/);
-            if (m) duration = parseInt(m[1], 10);
+            duration = parseDurationMinutes(info.completion_flag_text);
         }
         const durationSource = (info && info._source && info._source.duration) || (item && item.duration != null ? 'myCourseItem.duration' : null) || 'unknown';
 
         return {
             title: title,
             action: isSignIn ? "签到" : "签退",
-            deadline: deadlineRaw,
+            deadline: actionDeadline,
             id: id,
             signInStart: signInStart,
             signInEnd: signInEnd,
@@ -456,7 +527,8 @@ async function processItems(items, headers) {
         // 打印所有待参加活动的签到时间段和签退时间段
         log("待参加活动列表详情:");
         notifyItems.forEach(item => {
-            log(`【${item.category} | ${item.statusLabel}】[${item.id}] [${item.action}] ${item.title}`);
+            const durationText = item.duration != null ? `${item.duration}分钟` : '未知';
+            log(`【${item.category} | ${durationText}】[${item.id}] [${item.action}] ${item.title}`);
             log(`  签到时间: ${item.signInStart || '未设置'} - ${item.signInEnd || '未设置'}`);
             log(`  签退时间: ${item.signOutStart || '未设置'} - ${item.signOutEnd || '未设置'}`);
             let ds = '';
@@ -526,6 +598,55 @@ async function processItems(items, headers) {
     return notifyItems;
 }
 
+// 打印今天有签到/签退的课程安排
+async function logTodaySchedule(items) {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+
+    // 筛选今天内有签到或签退的课程
+    const todayItems = items.filter(item => {
+        const signInEnd = item.sign_in_end_time;
+        const signOutEnd = item.sign_out_end_time;
+        const deadline = signInEnd || signOutEnd;
+
+        if (!deadline) return false;
+        const deadlineTs = new Date(String(deadline).replace(/-/g, '/')).getTime();
+        return !isNaN(deadlineTs) && deadlineTs >= todayStart.getTime() && deadlineTs < todayEnd.getTime();
+    });
+
+    if (todayItems.length === 0) {
+        log("📅 今天没有课程安排");
+        return;
+    }
+
+    log(`\n${'='.repeat(60)}`);
+    log(`📅 今天的课程安排 (共 ${todayItems.length} 个)`);
+    log(`${'='.repeat(60)}`);
+
+    todayItems.forEach(item => {
+        const category = item.transcript_index ? item.transcript_index.transcript_name : (item.transcript_name || '未知');
+        const title = item.title || item.course_title || `课程${item.id || item.course_id}`;
+        const id = item.id || item.course_id;
+        const duration = item.duration != null ? `${item.duration}分钟` : '未知';
+
+        log(`[${id}] ${title}`);
+        log(`  📌 ${category} | ⏱️ ${duration}`);
+
+        if (item.sign_in_start_time && item.sign_in_end_time) {
+            log(`  🔓 签到: ${item.sign_in_start_time} ~ ${item.sign_in_end_time}`);
+        }
+
+        if (item.sign_out_start_time && item.sign_out_end_time) {
+            log(`  🔐 签退: ${item.sign_out_start_time} ~ ${item.sign_out_end_time}`);
+        }
+
+        log('');
+    });
+
+    log(`${'='.repeat(60)}\n`);
+}
+
 function getStatusLabel(item) {
     const label = item && item.status_label ? String(item.status_label).trim() : '';
     if (label) return label;
@@ -537,7 +658,27 @@ function getStatusLabel(item) {
 }
 
 // Env Polyfill
-function Env(t, e) { class s { constructor(t) { this.env = t } } return new class { constructor(t) { this.name = t, this.logs = [], this.isSurge = !1, this.isQuanX = "undefined" != typeof $task, this.isLoon = !1 } getdata(t) { let e = this.getval(t); if (/^@/.test(t)) { const [, s, i] = /^@(.*?)\.(.*?)$/.exec(t), r = s ? this.getval(s) : ""; if (r) try { const t = JSON.parse(r); e = t ? this.getval(i, t) : null } catch (t) { e = "" } } return e } setdata(t, e) { let s = !1; if (/^@/.test(e)) { const [, i, r] = /^@(.*?)\.(.*?)$/.exec(e), o = this.getval(i), h = i ? "null" === o ? null : o || "{}" : "{}"; try { const e = JSON.parse(h); this.setval(r, t, e), s = !0, this.setval(i, JSON.stringify(e)) } catch (e) { const o = {}; this.setval(r, t, o), s = !0, this.setval(i, JSON.stringify(o)) } } else s = this.setval(t, e); return s } getval(t) { return this.isQuanX ? $prefs.valueForKey(t) : "" } setval(t, e) { return this.isQuanX ? $prefs.setValueForKey(t, e) : "" } msg(e = t, s = "", i = "", r) { this.isQuanX && $notify(e, s, i, r) } get(t, e = (() => { })) { this.isQuanX && ("string" == typeof t && (t = { url: t }), t.method = "GET", $task.fetch(t).then(t => { e(null, t, t.body) }, t => e(t.error, null, null))) } done(t = {}) { this.isQuanX && $done(t) } }(t, e) }
+function Env(t, e) { 
+    class s { constructor(t) { this.env = t } } 
+    return new class { 
+        constructor(t) { this.name = t, this.logs = [], this.isSurge = !1, this.isQuanX = "undefined" != typeof $task, this.isLoon = !1 } 
+        getdata(t) { let e = this.getval(t); if (/^@/.test(t)) { const [, s, i] = /^@(.*?)\.(.*?)$/.exec(t), r = s ? this.getval(s) : ""; if (r) try { const t = JSON.parse(r); e = t ? this.getval(i, t) : null } catch (t) { e = "" } } return e } 
+        setdata(t, e) { let s = !1; if (/^@/.test(e)) { const [, i, r] = /^@(.*?)\.(.*?)$/.exec(e), o = this.getval(i), h = i ? "null" === o ? null : o || "{}" : "{}"; try { const e = JSON.parse(h); this.setval(r, t, e), s = !0, this.setval(i, JSON.stringify(e)) } catch (e) { const o = {}; this.setval(r, t, o), s = !0, this.setval(i, JSON.stringify(o)) } } else s = this.setval(t, e); return s } 
+        getval(t) { return this.isQuanX ? $prefs.valueForKey(t) : "" } 
+        setval(t, e) { return this.isQuanX ? $prefs.setValueForKey(t, e) : "" } 
+        msg(e = t, s = "", i = "", r) { 
+            if (this.isQuanX) {
+                if (typeof $notify === 'function') {
+                    $notify(e, s, i, r)
+                } else {
+                    console.log(`[notify] ${e} | ${s} | ${i}`)
+                }
+            }
+        } 
+        get(t, e = (() => { })) { this.isQuanX && ("string" == typeof t && (t = { url: t }), t.method = "GET", $task.fetch(t).then(t => { e(null, t, t.body) }, t => e(t.error, null, null))) } 
+        done(t = {}) { this.isQuanX && (typeof $done === 'function') && $done(t) } 
+    }(t, e) 
+}
 
 // 统一通知出口：支持调试模式不发送通知
 function notify(title, subtitle = "", body = "", options) {
