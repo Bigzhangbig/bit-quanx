@@ -202,7 +202,13 @@ function Env(t, e) {
             return this.isQuanX ? $prefs.setValueForKey(t, e) : ""
         }
         msg(e = t, s = "", i = "", r) {
-            this.isQuanX && $notify(e, s, i, r)
+            if (this.isQuanX) {
+                if (typeof $notify === 'function') {
+                    $notify(e, s, i, r)
+                } else {
+                    console.log(`[notify] ${e} | ${s} | ${i}`)
+                }
+            }
         }
         get(t, e = (() => {})) {
             this.isQuanX && ("string" == typeof t && (t = {
