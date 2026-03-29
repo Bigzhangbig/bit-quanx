@@ -20,6 +20,12 @@ function log(...args) {
     console.log(...args);
 }
 
+function debugLog(...args) {
+    if (isDebugMode()) {
+        log(...args);
+    }
+}
+
 log("脚本开始运行");
 
 const CONFIG = {
@@ -141,37 +147,25 @@ function httpGetWithRetry(url, headers, timeout, retries) {
     return new Promise((resolve, reject) => {
         const opts = { url, headers, timeout };
 
-        // 心跳日志：在等待响应或重试期间每秒输出一次，便于诊断网络/阻塞感知
-        const startTs = Date.now();
-        let hb = setInterval(() => {
-            const secs = Math.floor((Date.now() - startTs) / 1000);
-            try { log(`[httpGet] hb ${secs}s`); } catch (e) {}
-        }, 1000);
-        const clearHb = () => { if (hb) { clearInterval(hb); hb = null; } };
-
         const attempt = (remaining) => {
             $.get(opts, (err, resp, data) => {
-                try {
-                    if (err) {
-                        if (remaining > 0) {
-                            log(`[httpGet] 请求错误，重试中（剩余 ${remaining} 次）： ${err}`);
-                            setTimeout(() => attempt(remaining - 1), 1000);
-                            return;
-                        }
-                        reject(err);
-                    } else {
-                        if (resp.status === 401 || resp.statusCode === 401) {
-                            resolve({ code: 401, message: "Unauthenticated." });
-                            return;
-                        }
-                        try {
-                            resolve(JSON.parse(data));
-                        } catch (e) {
-                            reject("JSON解析失败");
-                        }
+                if (err) {
+                    if (remaining > 0) {
+                        log(`[httpGet] 请求错误，重试中（剩余 ${remaining} 次）： ${err}`);
+                        setTimeout(() => attempt(remaining - 1), 1000);
+                        return;
                     }
-                } finally {
-                    clearHb();
+                    reject(err);
+                } else {
+                    if (resp.status === 401 || resp.statusCode === 401) {
+                        resolve({ code: 401, message: "Unauthenticated." });
+                        return;
+                    }
+                    try {
+                        resolve(JSON.parse(data));
+                    } catch (e) {
+                        reject("JSON解析失败");
+                    }
                 }
             });
         };
@@ -223,8 +217,10 @@ async function getMyCourseList(headers) {
                 CACHE.myCourseListFetchedAt = now;
                 log(`[myCourseList] 过滤失败，仍使用原始列表: ${JSON.stringify(e)}`);
             }
-            // 日志打印课程详情（即使为0条也打印接口与条数）
-            items.forEach(item => {
+            // 日志仅打印需要签到/签退的活动，避免无关信息
+            const signActionItems = items.filter(needsSignAction);
+            log(`[myCourseList] 需要签到/签退的活动: ${signActionItems.length} 条`);
+            signActionItems.forEach(item => {
                 const category = item.transcript_index ? item.transcript_index.transcript_name : (item.transcript_name || '未知');
                 const status = item.status_label || item.status;
                 const address = item.sign_in_address && Array.isArray(item.sign_in_address) ? item.sign_in_address.map(a => a.address).join(';') : (item.time_place || '未知');
@@ -350,6 +346,11 @@ async function processItems(items, headers, openUrl) {
         if (statusLabel === "已取消") continue;
         if (typeof item.status !== 'undefined' && (item.status === 4 || item.status === '4')) continue;
 
+        // 排除不需要签到/签退的活动，避免无效日志和详情请求
+        if (!needsSignAction(item)) {
+            continue;
+        }
+
         // 判断是否有签到/签退时间字段（表示这是一个允许签到/签退的课程）
         // 优先使用列表中的状态，但也兼容没有详细状态的情况
         const hasSignInTime = !!(item.sign_in_start_time || item.sign_in_end_time);
@@ -452,26 +453,26 @@ async function processItems(items, headers, openUrl) {
                 const siStart = new Date(String(signInStart).replace(/-/g, '/')).getTime();
                 if (now < siStart && (siStart - now) <= lookAheadMs) {
                     // 签到即将开始，但现在不在窗口，跳过并等待
-                    log(`[courseInfo] 跳过 id=${id}：签到窗口即将开始 ${signInStart}`);
+                    debugLog(`[courseInfo] 跳过 id=${id}：签到窗口即将开始 ${signInStart}`);
                     return null;
                 }
             }
-            log(`[courseInfo] 跳过 id=${id}：不在签到/签退窗口`);
+            debugLog(`[courseInfo] 跳过 id=${id}：不在签到/签退窗口`);
             return null;
         }
 
         if (!actionDeadline) {
-            log(`[courseInfo] 跳过 id=${id}：无截止时间`);
+            debugLog(`[courseInfo] 跳过 id=${id}：无截止时间`);
             return null;
         }
         
         const deadlineTs = new Date(String(actionDeadline).replace(/-/g, '/')).getTime();
         if (!Number.isFinite(deadlineTs)) {
-            log(`[courseInfo] 跳过 id=${id}：截止时间无法解析 ${actionDeadline}`);
+            debugLog(`[courseInfo] 跳过 id=${id}：截止时间无法解析 ${actionDeadline}`);
             return null;
         }
         if (now >= deadlineTs) {
-            log(`[courseInfo] 跳过 id=${id}：已过截止时间 ${actionDeadline}`);
+            debugLog(`[courseInfo] 跳过 id=${id}：已过截止时间 ${actionDeadline}`);
             return null;
         }
 
@@ -601,6 +602,8 @@ async function logTodaySchedule(items) {
 
     // 筛选今天内有签到或签退的课程
     const todayItems = items.filter(item => {
+        if (!needsSignAction(item)) return false;
+
         const signInEnd = item.sign_in_end_time;
         const signOutEnd = item.sign_out_end_time;
         const deadline = signInEnd || signOutEnd;
@@ -650,6 +653,27 @@ function getStatusLabel(item) {
     if (s === '1') return '待签退';
     if (s === '4') return '已取消';
     return label;
+}
+
+// 判断当前活动是否需要处理签到/签退
+function needsSignAction(item) {
+    if (!item) return false;
+
+    const hasSignWindow = !!(
+        item.sign_in_start_time || item.sign_in_end_time ||
+        item.sign_out_start_time || item.sign_out_end_time
+    );
+    if (!hasSignWindow) return false;
+
+    const label = getStatusLabel(item);
+    const status = String(item.status != null ? item.status : '').trim();
+    if (label === '待签到' || label === '待签退') return true;
+    if (status === '0' || status === '1') return true;
+
+    // 当接口未给出状态时，保守保留，避免误过滤
+    if (!label && !status) return true;
+
+    return false;
 }
 
 // Env Polyfill
