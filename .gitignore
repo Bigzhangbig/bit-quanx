@@ -23,3 +23,8 @@ qrcodes/
 Thumbs.db
 *trades*
 202*_*/
+
+# Python packaging artifacts
+dekt_gui_app/build/
+dekt_gui_app/dist/
+dekt_gui_app/*.spec

@@ -1,0 +1,44 @@
+name: Build DEKT GUI (Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "dekt_gui_app/**"
+      - ".github/workflows/build-dekt-gui-windows.yml"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: dekt_gui_app
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build executable
+        working-directory: dekt_gui_app
+        run: |
+          python -m PyInstaller --noconfirm --clean --windowed --name DEKT-GUI --paths . main.py
+
+      - name: Archive output
+        working-directory: dekt_gui_app/dist
+        shell: pwsh
+        run: |
+          Compress-Archive -Path DEKT-GUI -DestinationPath DEKT-GUI-windows.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DEKT-GUI-windows
+          path: dekt_gui_app/dist/DEKT-GUI-windows.zip

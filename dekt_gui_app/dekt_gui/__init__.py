@@ -1,0 +1,1 @@
+"""DEKT desktop GUI package."""

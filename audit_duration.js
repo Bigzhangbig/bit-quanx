@@ -13,7 +13,7 @@
  * 输出内容：
  * - 列表顶层有/缺失 duration 的课程数量
  * - transcript_index_type.duration 可用数量
- * - completion_flag_text 可解析分钟数的课程数量
+ * - completion_flag_text 可解析时长（小时/分钟）的课程数量
  * - REST 详情缺失 duration 的课程数量
  * - 开发建议（是否可删除兜底逻辑）
  */
@@ -62,6 +62,27 @@ function httpGet(url, headers) {
   });
 }
 
+function parseDurationMinutes(value) {
+  if (value == null) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const text = String(value).trim();
+  if (!text) return null;
+
+  if (/^\d+(?:\.\d+)?$/.test(text)) {
+    const n = Number(text);
+    return Number.isFinite(n) ? Math.round(n) : null;
+  }
+
+  const hourMatch = text.match(/(\d+(?:\.\d+)?)\s*小时/);
+  const minuteMatch = text.match(/(\d+(?:\.\d+)?)\s*分钟/);
+  if (!hourMatch && !minuteMatch) return null;
+
+  const hours = hourMatch ? Number(hourMatch[1]) : 0;
+  const minutes = minuteMatch ? Number(minuteMatch[1]) : 0;
+  const total = hours * 60 + minutes;
+  return Number.isFinite(total) ? Math.round(total) : null;
+}
+
 (async () => {
   const env = loadEnv();
   const tokenRaw = env['bit_sc_token'];
@@ -103,10 +124,7 @@ function httpGet(url, headers) {
     if (typeDuration != null) typeDurationAvailable++;
 
     const cText = it.completion_flag_text;
-    if (cText) {
-      const m = String(cText).match(/(\d{1,3})\s*分钟/);
-      if (m) completionTextParsed++;
-    }
+    if (parseDurationMinutes(cText) != null) completionTextParsed++;
 
     // 获取 REST 详情看是否有 duration
     const detail = await httpGet(`https://qcbldekt.bit.edu.cn/api/course/info/${id}`, headers);
@@ -124,7 +142,7 @@ function httpGet(url, headers) {
   console.log(`列表顶层有 duration 的课程: ${topDuration}`);
   console.log(`列表顶层缺失 duration 的课程: ${nullDurationIds.length}`);
   console.log(`transcript_index_type.duration 可用数量: ${typeDurationAvailable}`);
-  console.log(`completion_flag_text 可解析分钟数的课程: ${completionTextParsed}`);
+  console.log(`completion_flag_text 可解析时长(小时/分钟)的课程: ${completionTextParsed}`);
   console.log(`REST 详情缺失 duration 的课程: ${restMissingDuration}`);
   if (sampleMissing.length) {
     console.log('\n缺失 REST duration 示例(最多5条):');
