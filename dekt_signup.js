@@ -30,7 +30,9 @@ const CONFIG = {
     maxWaitTime: 20 * 60 * 1000, // 20 minutes
     checkInterval: 30 * 1000, // 30 seconds log interval
     burstInterval: 50, // 并发请求间隔 ms
-    verboseBurstLog: true // 是否打印每个并发请求的响应
+    verboseBurstLog: true, // 是否打印每个并发请求的响应
+    requestTimeoutMs: 15000,
+    requestRetries: 1
 };
 
 const LOG_PREFIX = '[DEKT]';
@@ -41,6 +43,13 @@ function _nowTs() {
 }
 function log(msg) { console.log(`[${_nowTs()}] ${LOG_PREFIX} ${msg}`); }
 
+let _isFinished = false;
+function finishOnce(payload = {}) {
+    if (_isFinished) return;
+    _isFinished = true;
+    $.done(payload);
+}
+
 /**
  * 动态获取微信小程序跳转链接
  * @param {string} pagePath - 小程序的页面路径 (可选)
@@ -48,15 +57,9 @@ function log(msg) { console.log(`[${_nowTs()}] ${LOG_PREFIX} ${msg}`); }
  */
 async function getWechatJumpLink(pagePath = '/pages/index/index') {
     const apiUrl = `https://qcbldekt.bit.edu.cn/api/generatescheme?path=${encodeURIComponent(pagePath)}`;
-    
+
     try {
-        const response = await fetch(apiUrl);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const result = await response.json();
-        
+        const result = await httpGet(apiUrl, {}, 1000, 0);
         if (result.code === 200 && result.data) {
             return result.data; // 返回 weixin://dl/business/?t=...
         } else {
@@ -77,39 +80,46 @@ function normalizeAuthToken(token) {
 }
 
 (async () => {
-    await main();
+    try {
+        await main();
+    } catch (e) {
+        let openUrl = "weixin://";
+        try {
+            const dynamicUrl = await getWechatJumpLink();
+            if (dynamicUrl) openUrl = dynamicUrl;
+        } catch (_) {}
+        log(`未捕获异常: ${e}`);
+        $.msg($.name, "❌ 脚本异常", String(e), { "open-url": openUrl });
+    } finally {
+        finishOnce();
+    }
 })();
 
 async function main() {
+    // 动态获取微信小程序跳转链接（1秒超时），失败时回退微信
+    let openUrl = "weixin://";
+    try {
+        const dynamicUrl = await getWechatJumpLink();
+        if (dynamicUrl) {
+            openUrl = dynamicUrl;
+        }
+    } catch (e) {
+        console.error('获取动态链接失败，直接跳转微信:', e);
+    }
+
     const token = $.getdata(CONFIG.tokenKey);
     const isNotifyNoUpdate = $.getdata(CONFIG.notifyNoUpdateKey) === "true";
     let hasNotified = false;
     
     if (!token) {
-        $.msg($.name, "❌ 未找到 Token", "请先运行 bit_cookie.js 获取 Token");
-        $.done();
+        $.msg($.name, "❌ 未找到 Token", "请先运行 bit_cookie.js 获取 Token", { "open-url": openUrl });
         return;
     }
 
     const authToken = normalizeAuthToken(token);
     if (!authToken) {
-        $.msg($.name, "❌ Token 无效", "请重新运行 bit_cookie.js 获取 Token");
-        $.done();
+        $.msg($.name, "❌ Token 无效", "请重新运行 bit_cookie.js 获取 Token", { "open-url": openUrl });
         return;
-    }
-
-    // 动态获取微信小程序跳转链接，失败时直接跳转微信
-    let openUrl = null;
-    try {
-        const dynamicUrl = await getWechatJumpLink();
-        if (dynamicUrl) {
-            openUrl = dynamicUrl;
-        } else {
-            openUrl = "weixin://"; // 获取失败，直接跳转微信
-        }
-    } catch (e) {
-        console.error('获取动态链接失败，直接跳转微信:', e);
-        openUrl = "weixin://"; // 发生错误，直接跳转微信
     }
 
     const headers = {};
@@ -131,7 +141,6 @@ async function main() {
 
     if (!Array.isArray(signupList) || signupList.length === 0) {
         console.log("待报名列表为空");
-        $.done();
         return;
     }
 
@@ -252,7 +261,7 @@ async function main() {
         log("已更新待报名列表");
     }
     
-    $.done();
+    return;
 }
 
 async function burstSignup(courseId, headers, endTime) {
@@ -367,27 +376,38 @@ async function autoSignup(courseId, headers) {
     }
 }
 
-function httpGet(url, headers) {
-    return new Promise((resolve, reject) => {
-        $.get({ url, headers }, (err, resp, data) => {
-            if (err) reject(err);
-            else {
-                try { resolve(JSON.parse(data)); }
-                catch (e) { resolve(data); }
-            }
-        });
-    });
+function httpGet(url, headers, timeout = CONFIG.requestTimeoutMs, retries = CONFIG.requestRetries) {
+    return httpRequestWithRetry("GET", { url, headers }, timeout, retries);
 }
 
-function httpPost(options) {
+function httpPost(options, timeout = CONFIG.requestTimeoutMs, retries = CONFIG.requestRetries) {
+    return httpRequestWithRetry("POST", options, timeout, retries);
+}
+
+function httpRequestWithRetry(method, options, timeout, retries) {
     return new Promise((resolve, reject) => {
-        $.post(options, (err, resp, data) => {
-            if (err) reject(err);
-            else {
+        const sender = method === "GET" ? $.get.bind($) : $.post.bind($);
+
+        const attempt = (remaining) => {
+            const req = Object.assign({}, options || {});
+            req.timeout = timeout;
+            sender(req, (err, resp, data) => {
+                if (err) {
+                    if (remaining > 0) {
+                        log(`[http${method}] 请求失败，重试中(剩余${remaining}次): ${err}`);
+                        setTimeout(() => attempt(remaining - 1), 800);
+                        return;
+                    }
+                    reject(err);
+                    return;
+                }
+
                 try { resolve(JSON.parse(data)); }
                 catch (e) { resolve(data); }
-            }
-        });
+            });
+        };
+
+        attempt(retries);
     });
 }
 

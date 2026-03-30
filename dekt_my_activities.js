@@ -69,26 +69,23 @@ if (typeof module === 'undefined' || require.main === module) {
 }
 
 async function checkActivities() {
-    const token = $.getdata(CONFIG.tokenKey);
-    const isDebug = isDebugMode();
-    const authToken = normalizeAuthToken(token);
-    if (!authToken) {
-        notify($.name, "❌ 未找到 Token", "请先在 BoxJS 或本地配置 bit_sc_token");
-        return;
-    }
-
-    // 动态获取微信小程序跳转链接，失败时直接跳转微信
-    let openUrl = null;
+    // 动态获取微信小程序跳转链接（1秒超时），失败时回退微信
+    let openUrl = "weixin://";
     try {
         const dynamicUrl = await getWechatJumpLink();
         if (dynamicUrl) {
             openUrl = dynamicUrl;
-        } else {
-            openUrl = "weixin://"; // 获取失败，直接跳转微信
         }
     } catch (e) {
         console.error('获取动态链接失败，直接跳转微信:', e);
-        openUrl = "weixin://"; // 发生错误，直接跳转微信
+    }
+
+    const token = $.getdata(CONFIG.tokenKey);
+    const isDebug = isDebugMode();
+    const authToken = normalizeAuthToken(token);
+    if (!authToken) {
+        notify($.name, "❌ 未找到 Token", "请先在 BoxJS 或本地配置 bit_sc_token", { "open-url": openUrl });
+        return;
     }
 
     const headers = {
@@ -138,9 +135,9 @@ async function checkActivities() {
     }
 }
 
-function httpGet(url, headers, timeout = 15000) {
+function httpGet(url, headers, timeout = 15000, retries = 1) {
     // 查询接口存在偶发抖动，保留 1 次快速重试，降低假失败概率
-    return httpGetWithRetry(url, headers, timeout, 1);
+    return httpGetWithRetry(url, headers, timeout, retries);
 }
 
 function httpGetWithRetry(url, headers, timeout, retries) {
@@ -735,12 +732,7 @@ async function getWechatJumpLink(pagePath = '/pages/index/index') {
     const apiUrl = `https://qcbldekt.bit.edu.cn/api/generatescheme?path=${encodeURIComponent(pagePath)}`;
     
     try {
-        const response = await fetch(apiUrl);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const result = await response.json();
+        const result = await httpGet(apiUrl, {}, 1000, 0);
         
         if (result.code === 200 && result.data) {
             return result.data; // 返回 weixin://dl/business/?t=...

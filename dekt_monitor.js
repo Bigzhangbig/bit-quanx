@@ -19,6 +19,13 @@ function log(...args) {
     console.log(`[${_nowTs()}]`, ...args);
 }
 
+let _isFinished = false;
+function finishOnce(payload = {}) {
+    if (_isFinished) return;
+    _isFinished = true;
+    $.done(payload);
+}
+
 log("加载脚本: 北理工第二课堂监控");
 
 // 配置项
@@ -54,6 +61,8 @@ const CONFIG = {
         2: "进行中",
         3: "已结束"
     },
+    requestTimeoutMs: 15000,
+    requestRetries: 1,
     // 报名接口
     applyUrl: "https://qcbldekt.bit.edu.cn/api/course/apply",
     // 固定的 Template ID
@@ -62,7 +71,19 @@ const CONFIG = {
 
 // 脚本入口
 (async () => {
-    await checkCourses();
+    try {
+        await checkCourses();
+    } catch (e) {
+        let openUrl = "weixin://";
+        try {
+            const dynamicUrl = await getWechatJumpLink();
+            if (dynamicUrl) openUrl = dynamicUrl;
+        } catch (_) {}
+        console.log(`[monitor] 未捕获异常: ${e}`);
+        $.msg("❌ 监控脚本异常", "", String(e), { "open-url": openUrl });
+    } finally {
+        finishOnce();
+    }
 })();
 
 // 监控逻辑 (运行在 Task 模式)
@@ -151,7 +172,7 @@ async function checkCourses() {
 
     if (!token) {
         $.msg("❌ 未找到 Token", "", "请先运行 bit_cookie.js 脚本，并进入微信小程序“第二课堂”刷新任意列表以获取 Token。");
-        $done();
+        finishOnce();
         return;
     }
 
@@ -161,7 +182,7 @@ async function checkCourses() {
 
     if (!headers['Authorization']) {
         $.msg("❌ Token 无效", "", "请先运行 bit_cookie.js 脚本重新获取 Token。");
-        $done();
+        finishOnce();
         return;
     }
 
@@ -455,7 +476,7 @@ function normalizeAuthToken(token) {
 
     if (isTokenExpired) {
         $.msg("⚠️ Token 已失效", "", "请重新进入小程序刷新列表获取新的 Token", { "open-url": openUrl });
-        $done();
+        finishOnce();
         return;
     }
 
@@ -495,7 +516,7 @@ function normalizeAuthToken(token) {
         }
     }
     
-    $done();
+    finishOnce();
 }
 
 // 自动报名函数
@@ -601,37 +622,42 @@ async function checkSignupList(token, headers, userId) {
     }
 }
 
-function httpGet(url, headers) {
-    return new Promise((resolve, reject) => {
-        $.get({ url, headers }, (err, resp, data) => {
-            if (err) {
-                reject(err);
-            } else {
-                try {
-                    const res = JSON.parse(data);
-                    resolve(res);
-                } catch (e) {
-                    resolve(data);
-                }
-            }
-        });
-    });
+function httpGet(url, headers, timeout = CONFIG.requestTimeoutMs, retries = CONFIG.requestRetries) {
+    return httpRequestWithRetry("GET", { url, headers }, timeout, retries);
 }
 
-function httpPost(options) {
+function httpPost(options, timeout = CONFIG.requestTimeoutMs, retries = CONFIG.requestRetries) {
+    return httpRequestWithRetry("POST", options, timeout, retries);
+}
+
+function httpRequestWithRetry(method, options, timeout, retries) {
     return new Promise((resolve, reject) => {
-        $.post(options, (err, resp, data) => {
-            if (err) {
-                reject(err);
-            } else {
+        const sender = method === "GET" ? $.get.bind($) : $.post.bind($);
+
+        const attempt = (remaining) => {
+            const req = Object.assign({}, options || {});
+            req.timeout = timeout;
+            sender(req, (err, resp, data) => {
+                if (err) {
+                    if (remaining > 0) {
+                        console.log(`[http${method}] 请求失败，重试中(剩余${remaining}次): ${err}`);
+                        setTimeout(() => attempt(remaining - 1), 800);
+                        return;
+                    }
+                    reject(err);
+                    return;
+                }
+
                 try {
                     const res = JSON.parse(data);
                     resolve(res);
                 } catch (e) {
                     resolve(data);
                 }
-            }
-        });
+            });
+        };
+
+        attempt(retries);
     });
 }
 
@@ -708,12 +734,7 @@ async function getWechatJumpLink(pagePath = '/pages/index/index') {
     const apiUrl = `https://qcbldekt.bit.edu.cn/api/generatescheme?path=${encodeURIComponent(pagePath)}`;
     
     try {
-        const response = await fetch(apiUrl);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const result = await response.json();
+        const result = await httpGet(apiUrl, {}, 1000, 0);
         
         if (result.code === 200 && result.data) {
             return result.data; // 返回 weixin://dl/business/?t=...
