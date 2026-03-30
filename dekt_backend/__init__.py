@@ -1,0 +1,1 @@
+"""DEKT backend service package."""

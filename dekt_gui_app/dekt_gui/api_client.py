@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import hmac
 import json
+import time
 from typing import Any
 
-import certifi
 import httpx
 
 
@@ -22,8 +24,223 @@ class VerifyResult:
 DEFAULT_TEMPLATE_ID = "2GNFjVv2S7xYnoWeIxGsJGP1Fu2zSs28R6mZI7Fc2kU"
 
 
+def _body_sha256(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _build_backend_signature(
+    api_key: str,
+    timestamp: str,
+    nonce: str,
+    method: str,
+    path: str,
+    payload: bytes,
+) -> str:
+    message = f"{timestamp}.{nonce}.{method.upper()}.{path}.{_body_sha256(payload)}"
+    return hmac.new(api_key.encode("utf-8"), message.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def backend_health_check(
+    base_url: str,
+    timeout: float = 8.0,
+    insecure_tls: bool = False,
+) -> tuple[bool, str]:
+    root = (base_url or "").strip().rstrip("/")
+    if not root:
+        return False, "Backend URL is empty"
+
+    try:
+        with _create_client(timeout=timeout, insecure_tls=insecure_tls) as client:
+            resp = client.get(f"{root}/health")
+    except Exception as exc:  # noqa: BLE001
+        return False, f"Backend request failed: {exc}"
+
+    if resp.status_code < 200 or resp.status_code >= 300:
+        return False, f"Backend HTTP {resp.status_code}"
+
+    try:
+        body: dict[str, Any] = resp.json()
+    except ValueError:
+        return False, "Backend response is not valid JSON"
+
+    if body.get("ok") is True:
+        return True, "Backend is reachable"
+    return False, str(body.get("error") or body.get("message") or "Backend health check failed")
+
+
+def backend_signed_post(
+    base_url: str,
+    path: str,
+    api_key: str,
+    body: dict[str, Any],
+    timeout: float = 10.0,
+    insecure_tls: bool = False,
+) -> tuple[bool, str, dict[str, Any]]:
+    root = (base_url or "").strip().rstrip("/")
+    if not root:
+        return False, "Backend URL is empty", {}
+
+    key = (api_key or "").strip()
+    if not key:
+        return False, "Backend API key is empty", {}
+
+    req_path = path if path.startswith("/") else f"/{path}"
+    url = f"{root}{req_path}"
+    payload = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+    ts = str(int(time.time()))
+    nonce = f"gui-{ts}"
+    signature = _build_backend_signature(
+        api_key=key,
+        timestamp=ts,
+        nonce=nonce,
+        method="POST",
+        path=req_path,
+        payload=payload,
+    )
+    headers = {
+        "Content-Type": "application/json",
+        "X-API-Key": key,
+        "X-Timestamp": ts,
+        "X-Nonce": nonce,
+        "X-Signature": signature,
+    }
+
+    try:
+        with _create_client(timeout=timeout, insecure_tls=insecure_tls) as client:
+            resp = client.post(url, content=payload, headers=headers)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"Backend request failed: {exc}", {}
+
+    try:
+        data: dict[str, Any] = resp.json()
+    except ValueError:
+        return False, f"Backend HTTP {resp.status_code}", {}
+
+    if resp.status_code < 200 or resp.status_code >= 300:
+        detail = data.get("error") or data.get("detail") or data.get("message") or f"HTTP {resp.status_code}"
+        return False, str(detail), data
+
+    if data.get("ok") is False:
+        return False, str(data.get("error") or data.get("message") or "backend_error"), data
+    return True, str(data.get("message") or "ok"), data
+
+
+def backend_signed_get(
+    base_url: str,
+    path: str,
+    api_key: str,
+    timeout: float = 10.0,
+    insecure_tls: bool = False,
+) -> tuple[bool, str, dict[str, Any]]:
+    root = (base_url or "").strip().rstrip("/")
+    if not root:
+        return False, "Backend URL is empty", {}
+
+    key = (api_key or "").strip()
+    if not key:
+        return False, "Backend API key is empty", {}
+
+    req_path = path if path.startswith("/") else f"/{path}"
+    url = f"{root}{req_path}"
+
+    ts = str(int(time.time()))
+    nonce = f"gui-{ts}"
+    signature = _build_backend_signature(
+        api_key=key,
+        timestamp=ts,
+        nonce=nonce,
+        method="GET",
+        path=req_path,
+        payload=b"",
+    )
+    headers = {
+        "X-API-Key": key,
+        "X-Timestamp": ts,
+        "X-Nonce": nonce,
+        "X-Signature": signature,
+    }
+
+    try:
+        with _create_client(timeout=timeout, insecure_tls=insecure_tls) as client:
+            resp = client.get(url, headers=headers)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"Backend request failed: {exc}", {}
+
+    try:
+        data: dict[str, Any] = resp.json()
+    except ValueError:
+        return False, f"Backend HTTP {resp.status_code}", {}
+
+    if resp.status_code < 200 or resp.status_code >= 300:
+        detail = data.get("error") or data.get("detail") or data.get("message") or f"HTTP {resp.status_code}"
+        return False, str(detail), data
+
+    if data.get("ok") is False:
+        return False, str(data.get("error") or data.get("message") or "backend_error"), data
+    return True, str(data.get("message") or "ok"), data
+
+
+def backend_signed_put(
+    base_url: str,
+    path: str,
+    api_key: str,
+    body: dict[str, Any],
+    timeout: float = 10.0,
+    insecure_tls: bool = False,
+) -> tuple[bool, str, dict[str, Any]]:
+    root = (base_url or "").strip().rstrip("/")
+    if not root:
+        return False, "Backend URL is empty", {}
+
+    key = (api_key or "").strip()
+    if not key:
+        return False, "Backend API key is empty", {}
+
+    req_path = path if path.startswith("/") else f"/{path}"
+    url = f"{root}{req_path}"
+    payload = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+    ts = str(int(time.time()))
+    nonce = f"gui-{ts}"
+    signature = _build_backend_signature(
+        api_key=key,
+        timestamp=ts,
+        nonce=nonce,
+        method="PUT",
+        path=req_path,
+        payload=payload,
+    )
+    headers = {
+        "Content-Type": "application/json",
+        "X-API-Key": key,
+        "X-Timestamp": ts,
+        "X-Nonce": nonce,
+        "X-Signature": signature,
+    }
+
+    try:
+        with _create_client(timeout=timeout, insecure_tls=insecure_tls) as client:
+            resp = client.put(url, content=payload, headers=headers)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"Backend request failed: {exc}", {}
+
+    try:
+        data: dict[str, Any] = resp.json()
+    except ValueError:
+        return False, f"Backend HTTP {resp.status_code}", {}
+
+    if resp.status_code < 200 or resp.status_code >= 300:
+        detail = data.get("error") or data.get("detail") or data.get("message") or f"HTTP {resp.status_code}"
+        return False, str(detail), data
+
+    if data.get("ok") is False:
+        return False, str(data.get("error") or data.get("message") or "backend_error"), data
+    return True, str(data.get("message") or "ok"), data
+
+
 def _create_client(timeout: float, insecure_tls: bool = False) -> httpx.Client:
-    verify: bool | str = False if insecure_tls else certifi.where()
+    verify: bool | str = False if insecure_tls else True
     return httpx.Client(timeout=timeout, follow_redirects=True, verify=verify)
 
 

@@ -38,7 +38,12 @@ from PySide6.QtWidgets import (
 
 from .api_client import (
     DEFAULT_TEMPLATE_ID,
+    VerifyResult,
     apply_course,
+    backend_health_check,
+    backend_signed_get,
+    backend_signed_post,
+    backend_signed_put,
     cancel_course,
     fetch_token_from_gist,
     get_checkin_info,
@@ -119,6 +124,25 @@ class MainWindow(QMainWindow):
 
         self.tls_insecure_checkbox = QCheckBox("Ignore TLS certificate verification (debug only)")
         self.tls_insecure_checkbox.setChecked(self.config.tls_insecure)
+
+        self.backend_mode_checkbox = QCheckBox("Use backend mode (signed API calls)")
+        self.backend_mode_checkbox.setChecked(self.config.backend_mode)
+
+        self.backend_base_url_input = QLineEdit(self.config.backend_base_url)
+        self.backend_base_url_input.setPlaceholderText("https://backend.example.com")
+
+        self.backend_api_key_input = QLineEdit(self.config.backend_api_key)
+        self.backend_api_key_input.setPlaceholderText("Backend API key")
+        self.backend_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+
+        self.whitelist_category_ids_input = QLineEdit(self.config.whitelist_category_ids)
+        self.whitelist_category_ids_input.setPlaceholderText("1,2,3,4,5,6")
+
+        self.whitelist_grade_input = QLineEdit(self.config.whitelist_grade)
+        self.whitelist_grade_input.setPlaceholderText("2024,2025")
+
+        self.whitelist_academy_input = QLineEdit(self.config.whitelist_academy)
+        self.whitelist_academy_input.setPlaceholderText("计算机学院,睿信书院")
 
         self.monitor_status_combo = QComboBox()
         self.monitor_status_combo.addItem("未开始", 1)
@@ -222,6 +246,12 @@ class MainWindow(QMainWindow):
         form.addRow("Gist file", self.gist_filename_input)
         form.addRow("Tencent map key", self.tencent_map_key_input)
         form.addRow("TLS", self.tls_insecure_checkbox)
+        form.addRow("Backend mode", self.backend_mode_checkbox)
+        form.addRow("Backend URL", self.backend_base_url_input)
+        form.addRow("Backend API key", self.backend_api_key_input)
+        form.addRow("Whitelist categories", self.whitelist_category_ids_input)
+        form.addRow("Whitelist grade", self.whitelist_grade_input)
+        form.addRow("Whitelist academy", self.whitelist_academy_input)
 
         btn_row = QHBoxLayout()
         save_btn = QPushButton("Save credentials")
@@ -233,9 +263,25 @@ class MainWindow(QMainWindow):
         pull_gist_btn = QPushButton("Load token from Gist")
         pull_gist_btn.clicked.connect(self.on_pull_gist)
 
+        backend_ping_btn = QPushButton("Test backend connection")
+        backend_ping_btn.clicked.connect(self.on_backend_ping)
+
+        backend_sync_token_btn = QPushButton("Sync token to backend")
+        backend_sync_token_btn.clicked.connect(self.on_backend_sync_token)
+
+        backend_push_cfg_btn = QPushButton("Sync whitelist to backend")
+        backend_push_cfg_btn.clicked.connect(self.on_backend_push_config)
+
+        backend_pull_cfg_btn = QPushButton("Load whitelist from backend")
+        backend_pull_cfg_btn.clicked.connect(self.on_backend_pull_config)
+
         btn_row.addWidget(save_btn)
         btn_row.addWidget(verify_btn)
         btn_row.addWidget(pull_gist_btn)
+        btn_row.addWidget(backend_ping_btn)
+        btn_row.addWidget(backend_sync_token_btn)
+        btn_row.addWidget(backend_push_cfg_btn)
+        btn_row.addWidget(backend_pull_cfg_btn)
         btn_row.addStretch(1)
 
         layout.addWidget(cred_box)
@@ -316,26 +362,50 @@ class MainWindow(QMainWindow):
             self.on_activities_refresh(silent_if_no_token=True)
 
     def on_sign_refresh(self, silent_if_no_token: bool = False) -> None:
-        token = self.token_input.text().strip()
-        if not token:
-            if not silent_if_no_token:
-                QMessageBox.warning(self, "Warning", "Token is empty")
-            return
+        insecure = self.tls_insecure_checkbox.isChecked()
+        if self.backend_mode_checkbox.isChecked():
+            base_url = self.backend_base_url_input.text().strip()
+            api_key = self.backend_api_key_input.text().strip()
+            if not base_url or not api_key:
+                if not silent_if_no_token:
+                    QMessageBox.warning(self, "Warning", "Backend URL/API key is empty")
+                return
 
-        self._set_status("Loading signable activities...")
-        worker = Worker(self._fetch_my_courses, token, self.tls_insecure_checkbox.isChecked())
+            self._set_status("Loading signable activities from backend...")
+            worker = Worker(self._fetch_my_courses_backend, base_url, api_key, insecure)
+        else:
+            token = self.token_input.text().strip()
+            if not token:
+                if not silent_if_no_token:
+                    QMessageBox.warning(self, "Warning", "Token is empty")
+                return
+
+            self._set_status("Loading signable activities...")
+            worker = Worker(self._fetch_my_courses, token, insecure)
         worker.signals.done.connect(self._on_sign_refresh_done)
         self.pool.start(worker)
 
     def on_activities_refresh(self, silent_if_no_token: bool = False) -> None:
-        token = self.token_input.text().strip()
-        if not token:
-            if not silent_if_no_token:
-                QMessageBox.warning(self, "Warning", "Token is empty")
-            return
+        insecure = self.tls_insecure_checkbox.isChecked()
+        if self.backend_mode_checkbox.isChecked():
+            base_url = self.backend_base_url_input.text().strip()
+            api_key = self.backend_api_key_input.text().strip()
+            if not base_url or not api_key:
+                if not silent_if_no_token:
+                    QMessageBox.warning(self, "Warning", "Backend URL/API key is empty")
+                return
 
-        self._set_status("Loading my activities...")
-        worker = Worker(self._fetch_my_courses, token, self.tls_insecure_checkbox.isChecked())
+            self._set_status("Loading my activities from backend...")
+            worker = Worker(self._fetch_my_courses_backend, base_url, api_key, insecure)
+        else:
+            token = self.token_input.text().strip()
+            if not token:
+                if not silent_if_no_token:
+                    QMessageBox.warning(self, "Warning", "Token is empty")
+                return
+
+            self._set_status("Loading my activities...")
+            worker = Worker(self._fetch_my_courses, token, insecure)
         worker.signals.done.connect(self._on_activities_refresh_done)
         self.pool.start(worker)
 
@@ -346,6 +416,26 @@ class MainWindow(QMainWindow):
             timeout=15.0,
             insecure_tls=insecure,
         )
+
+    def _fetch_my_courses_backend(
+        self,
+        base_url: str,
+        api_key: str,
+        insecure: bool,
+    ) -> tuple[bool, str, list[dict[str, Any]]]:
+        ok, msg, data = backend_signed_get(
+            base_url=base_url,
+            path="/api/v1/courses/my",
+            api_key=api_key,
+            timeout=15.0,
+            insecure_tls=insecure,
+        )
+        if not ok:
+            return False, msg, []
+
+        items_obj = data.get("data") if isinstance(data, dict) else []
+        items = items_obj if isinstance(items_obj, list) else []
+        return True, "OK", [i for i in items if isinstance(i, dict)]
 
     def _window_text(self, start: str, end: str) -> str:
         if start and end:
@@ -489,23 +579,45 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "课程详情", f"课程 ID 无效: {course_id_text}")
             return
 
-        token = self.token_input.text().strip()
-        if not token:
-            QMessageBox.warning(self, "课程详情", "Token is empty")
-            return
-
         fallback_obj = id_item.data(Qt.ItemDataRole.UserRole)
         if not isinstance(fallback_obj, dict):
             fallback_obj = {}
 
         course_id = int(course_id_text)
+        insecure = self.tls_insecure_checkbox.isChecked()
+
+        if self.backend_mode_checkbox.isChecked():
+            base_url = self.backend_base_url_input.text().strip()
+            api_key = self.backend_api_key_input.text().strip()
+            if not base_url or not api_key:
+                QMessageBox.warning(self, "课程详情", "Backend URL/API key is empty")
+                return
+
+            self._set_status(f"Loading course detail from backend: {course_id}")
+            worker = Worker(
+                self._load_course_detail_backend,
+                base_url,
+                api_key,
+                course_id,
+                fallback_obj,
+                insecure,
+            )
+            worker.signals.done.connect(self._on_course_detail_loaded)
+            self.pool.start(worker)
+            return
+
+        token = self.token_input.text().strip()
+        if not token:
+            QMessageBox.warning(self, "课程详情", "Token is empty")
+            return
+
         self._set_status(f"Loading course detail: {course_id}")
         worker = Worker(
             self._load_course_detail,
             token,
             course_id,
             fallback_obj,
-            self.tls_insecure_checkbox.isChecked(),
+            insecure,
         )
         worker.signals.done.connect(self._on_course_detail_loaded)
         self.pool.start(worker)
@@ -544,7 +656,7 @@ class MainWindow(QMainWindow):
             return
 
         token = self.token_input.text().strip()
-        if not token:
+        if (not self.backend_mode_checkbox.isChecked()) and (not token):
             QMessageBox.warning(self, "Warning", "Token is empty")
             return
 
@@ -567,12 +679,28 @@ class MainWindow(QMainWindow):
         fallback_obj: dict[str, Any],
         insecure: bool,
     ) -> tuple[bool, str]:
-        _ok_info, _msg_info, info = get_checkin_info(
-            token=token,
-            course_id=course_id,
-            timeout=12.0,
-            insecure_tls=insecure,
-        )
+        if self.backend_mode_checkbox.isChecked():
+            base_url = self.backend_base_url_input.text().strip()
+            api_key = self.backend_api_key_input.text().strip()
+            ok_info, msg_info, data_info = backend_signed_get(
+                base_url=base_url,
+                path=f"/api/v1/courses/{course_id}/checkin-info",
+                api_key=api_key,
+                timeout=12.0,
+                insecure_tls=insecure,
+            )
+            info_obj = data_info.get("data") if isinstance(data_info, dict) else {}
+            if not ok_info:
+                return False, f"获取打卡信息失败: {msg_info}"
+            info = info_obj if isinstance(info_obj, dict) else {}
+        else:
+            _ok_info, _msg_info, info = get_checkin_info(
+                token=token,
+                course_id=course_id,
+                timeout=12.0,
+                insecure_tls=insecure,
+            )
+
         merged = dict(fallback_obj)
         if isinstance(info, dict):
             merged.update(info)
@@ -609,17 +737,37 @@ class MainWindow(QMainWindow):
             address = self._first_non_empty(merged, ["sign_place", "checkin_location", "place", "location"])
 
         try:
+            latitude_value = float(lat)
+            longitude_value = float(lon)
+        except (TypeError, ValueError):
+            return False, "打卡坐标格式无效"
+
+        if self.backend_mode_checkbox.isChecked():
+            base_url = self.backend_base_url_input.text().strip()
+            api_key = self.backend_api_key_input.text().strip()
+            action_path = "sign-in" if action == "signIn" else "sign-out"
+            ok_sign, sign_msg, _data = backend_signed_post(
+                base_url=base_url,
+                path=f"/api/v1/courses/{course_id}/{action_path}",
+                api_key=api_key,
+                body={
+                    "address": address,
+                    "latitude": latitude_value,
+                    "longitude": longitude_value,
+                },
+                timeout=12.0,
+                insecure_tls=insecure,
+            )
+        else:
             ok_sign, sign_msg = submit_sign_action(
                 token=token,
                 course_id=course_id,
                 address=address,
-                latitude=float(lat),
-                longitude=float(lon),
+                latitude=latitude_value,
+                longitude=longitude_value,
                 timeout=12.0,
                 insecure_tls=insecure,
             )
-        except (TypeError, ValueError):
-            return False, "打卡坐标格式无效"
 
         label = "签到" if action == "signIn" else "签退"
         return ok_sign, f"{label} {course_id}: {sign_msg}"
@@ -709,6 +857,42 @@ class MainWindow(QMainWindow):
                 merged["__enrolled"] = course_id in enrolled_ids
 
         # 仅在点进课程详情时预加载该课程封面，避免列表页并发抢网络。
+        cover_url = self._normalize_media_url(self._cover_url(merged))
+        if cover_url and cover_url not in self._image_bytes_cache:
+            _u, content = self._download_image_bytes_task(cover_url, insecure, 10.0)
+            self._image_bytes_cache[cover_url] = content
+
+        return ok, msg, merged
+
+    def _load_course_detail_backend(
+        self,
+        base_url: str,
+        api_key: str,
+        course_id: int,
+        fallback_obj: dict[str, Any],
+        insecure: bool,
+    ) -> tuple[bool, str, dict[str, Any]]:
+        ok, msg, data = backend_signed_get(
+            base_url=base_url,
+            path=f"/api/v1/courses/{course_id}/detail",
+            api_key=api_key,
+            timeout=12.0,
+            insecure_tls=insecure,
+        )
+
+        merged = dict(fallback_obj)
+        detail_obj = data.get("data") if isinstance(data, dict) else {}
+        if isinstance(detail_obj, dict):
+            merged.update(detail_obj)
+            for nested_key in ["course", "info", "item"]:
+                nested_obj = detail_obj.get(nested_key)
+                if isinstance(nested_obj, dict):
+                    merged.update(nested_obj)
+
+        # Activities 列表来自 /courses/my，详情默认视为已报名。
+        if "__enrolled" not in merged:
+            merged["__enrolled"] = True
+
         cover_url = self._normalize_media_url(self._cover_url(merged))
         if cover_url and cover_url not in self._image_bytes_cache:
             _u, content = self._download_image_bytes_task(cover_url, insecure, 10.0)
@@ -1570,7 +1754,7 @@ class MainWindow(QMainWindow):
 
     def _run_monitor_course_action(self, action: str, course_id_text: str) -> None:
         token = self.token_input.text().strip()
-        if not token:
+        if (not self.backend_mode_checkbox.isChecked()) and (not token):
             QMessageBox.warning(self, "Warning", "Token is empty")
             return
 
@@ -1593,6 +1777,34 @@ class MainWindow(QMainWindow):
         course_id: int,
         insecure: bool,
     ) -> tuple[bool, str]:
+        if self.backend_mode_checkbox.isChecked():
+            base_url = self.backend_base_url_input.text().strip()
+            api_key = self.backend_api_key_input.text().strip()
+
+            if action == "signup":
+                ok, msg, _data = backend_signed_post(
+                    base_url=base_url,
+                    path=f"/api/v1/courses/{course_id}/apply",
+                    api_key=api_key,
+                    body={},
+                    timeout=12.0,
+                    insecure_tls=insecure,
+                )
+                return ok, f"Signup course {course_id}: {msg}"
+
+            if action == "cancel":
+                ok, msg, _data = backend_signed_post(
+                    base_url=base_url,
+                    path=f"/api/v1/courses/{course_id}/cancel",
+                    api_key=api_key,
+                    body={},
+                    timeout=12.0,
+                    insecure_tls=insecure,
+                )
+                return ok, f"Cancel course {course_id}: {msg}"
+
+            return False, f"Unknown action: {action}"
+
         ok, msg, enrolled_ids = list_my_course_ids(
             token=token,
             limit=300,
@@ -1666,6 +1878,12 @@ class MainWindow(QMainWindow):
             tencent_map_key=self.tencent_map_key_input.text().strip(),
             tls_insecure=self.tls_insecure_checkbox.isChecked(),
             signup_queue_text="",
+            backend_mode=self.backend_mode_checkbox.isChecked(),
+            backend_base_url=self.backend_base_url_input.text().strip() or "https://127.0.0.1:8000",
+            backend_api_key=self.backend_api_key_input.text().strip(),
+            whitelist_category_ids=self.whitelist_category_ids_input.text().strip(),
+            whitelist_grade=self.whitelist_grade_input.text().strip(),
+            whitelist_academy=self.whitelist_academy_input.text().strip(),
         )
 
     def _append_log(self, text: str) -> None:
@@ -1689,9 +1907,41 @@ class MainWindow(QMainWindow):
             return
 
         self._set_status("Verifying token...")
-        worker = Worker(verify_token, token, 12.0, self.tls_insecure_checkbox.isChecked())
+        if self.backend_mode_checkbox.isChecked():
+            worker = Worker(
+                self._verify_token_backend_task,
+                self.backend_base_url_input.text().strip(),
+                self.backend_api_key_input.text().strip(),
+                token,
+                self.tls_insecure_checkbox.isChecked(),
+            )
+        else:
+            worker = Worker(verify_token, token, 12.0, self.tls_insecure_checkbox.isChecked())
         worker.signals.done.connect(self._on_verify_done)
         self.pool.start(worker)
+
+    def _verify_token_backend_task(
+        self,
+        base_url: str,
+        api_key: str,
+        token: str,
+        insecure: bool,
+    ) -> VerifyResult:
+        ok, msg, data = backend_signed_post(
+            base_url=base_url,
+            path="/api/v1/auth/verify",
+            api_key=api_key,
+            body={"token": token, "use_stored": False},
+            timeout=12.0,
+            insecure_tls=insecure,
+        )
+        if not ok:
+            return VerifyResult(ok=False, message=msg)
+
+        user_id = ""
+        if isinstance(data, dict):
+            user_id = str(data.get("user_id") or "")
+        return VerifyResult(ok=True, message="Token is valid", user_id=user_id)
 
     def _on_verify_done(self, result) -> None:
         if result.ok:
@@ -1721,22 +1971,234 @@ class MainWindow(QMainWindow):
         else:
             self._set_status(f"Failed to load token from Gist: {msg}")
 
+    def on_backend_ping(self) -> None:
+        base_url = self.backend_base_url_input.text().strip()
+        if not base_url:
+            QMessageBox.warning(self, "Warning", "Backend URL is empty")
+            return
+
+        self._set_status("Checking backend health...")
+        worker = Worker(
+            backend_health_check,
+            base_url,
+            8.0,
+            self.tls_insecure_checkbox.isChecked(),
+        )
+        worker.signals.done.connect(self._on_backend_ping_done)
+        self.pool.start(worker)
+
+    def _on_backend_ping_done(self, result: tuple[bool, str]) -> None:
+        ok, msg = result
+        if ok:
+            self._set_status(f"Backend reachable: {msg}")
+        else:
+            self._set_status(f"Backend unreachable: {msg}")
+
+    def on_backend_sync_token(self) -> None:
+        base_url = self.backend_base_url_input.text().strip()
+        api_key = self.backend_api_key_input.text().strip()
+        token = self.token_input.text().strip()
+
+        if not token:
+            QMessageBox.warning(self, "Warning", "Token is empty")
+            return
+
+        self._set_status("Syncing token to backend...")
+        worker = Worker(
+            backend_signed_post,
+            base_url,
+            "/api/v1/auth/set-token",
+            api_key,
+            {"token": token},
+            10.0,
+            self.tls_insecure_checkbox.isChecked(),
+        )
+        worker.signals.done.connect(self._on_backend_sync_token_done)
+        self.pool.start(worker)
+
+    def _on_backend_sync_token_done(self, result: tuple[bool, str, dict[str, Any]]) -> None:
+        ok, msg, _data = result
+        if ok:
+            self._set_status("Token synced to backend")
+            return
+        self._set_status(f"Token sync failed: {msg}")
+
+    def _csv_to_list(self, raw: str) -> list[str]:
+        out: list[str] = []
+        for item in (raw or "").split(","):
+            text = item.strip()
+            if not text:
+                continue
+            if text not in out:
+                out.append(text)
+        return out
+
+    def _csv_to_int_list(self, raw: str) -> list[int]:
+        out: list[int] = []
+        for text in self._csv_to_list(raw):
+            try:
+                value = int(text)
+            except ValueError:
+                continue
+            if 1 <= value <= 6 and value not in out:
+                out.append(value)
+        return out
+
+    def on_backend_push_config(self) -> None:
+        base_url = self.backend_base_url_input.text().strip()
+        api_key = self.backend_api_key_input.text().strip()
+
+        payload = {
+            "whitelist_category_ids": self._csv_to_int_list(self.whitelist_category_ids_input.text()),
+            "whitelist_grade": self._csv_to_list(self.whitelist_grade_input.text()),
+            "whitelist_academy": self._csv_to_list(self.whitelist_academy_input.text()),
+            "tls_insecure": self.tls_insecure_checkbox.isChecked(),
+        }
+
+        self._set_status("Syncing whitelist config to backend...")
+        worker = Worker(
+            backend_signed_put,
+            base_url,
+            "/api/v1/config",
+            api_key,
+            payload,
+            10.0,
+            self.tls_insecure_checkbox.isChecked(),
+        )
+        worker.signals.done.connect(self._on_backend_push_config_done)
+        self.pool.start(worker)
+
+    def _on_backend_push_config_done(self, result: tuple[bool, str, dict[str, Any]]) -> None:
+        ok, msg, _data = result
+        if ok:
+            self._set_status("Backend whitelist config synced")
+            return
+        self._set_status(f"Sync backend config failed: {msg}")
+
+    def on_backend_pull_config(self) -> None:
+        base_url = self.backend_base_url_input.text().strip()
+        api_key = self.backend_api_key_input.text().strip()
+        self._set_status("Loading whitelist config from backend...")
+        worker = Worker(
+            backend_signed_get,
+            base_url,
+            "/api/v1/config",
+            api_key,
+            10.0,
+            self.tls_insecure_checkbox.isChecked(),
+        )
+        worker.signals.done.connect(self._on_backend_pull_config_done)
+        self.pool.start(worker)
+
+    def _on_backend_pull_config_done(self, result: tuple[bool, str, dict[str, Any]]) -> None:
+        ok, msg, data = result
+        if not ok:
+            self._set_status(f"Load backend config failed: {msg}")
+            return
+
+        cfg_data = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(cfg_data, dict):
+            self._set_status("Backend config payload is invalid")
+            return
+
+        categories = cfg_data.get("whitelist_category_ids")
+        grades = cfg_data.get("whitelist_grade")
+        academy = cfg_data.get("whitelist_academy")
+
+        if isinstance(categories, list):
+            self.whitelist_category_ids_input.setText(",".join(str(int(x)) for x in categories if str(x).strip()))
+        if isinstance(grades, list):
+            self.whitelist_grade_input.setText(",".join(str(x).strip() for x in grades if str(x).strip()))
+        if isinstance(academy, list):
+            self.whitelist_academy_input.setText(",".join(str(x).strip() for x in academy if str(x).strip()))
+
+        self._set_status("Backend whitelist config loaded")
+
     def on_monitor_once(self, silent_if_no_token: bool = False) -> None:
+        sign_status = int(self.monitor_status_combo.currentData())
+        self._last_monitor_sign_status = sign_status
+        limit = int(self.monitor_limit_spin.value())
+        insecure = self.tls_insecure_checkbox.isChecked()
+
+        if self.backend_mode_checkbox.isChecked():
+            base_url = self.backend_base_url_input.text().strip()
+            api_key = self.backend_api_key_input.text().strip()
+            if not base_url or not api_key:
+                if not silent_if_no_token:
+                    QMessageBox.warning(self, "Warning", "Backend URL/API key is empty")
+                return
+
+            self._set_status("Running monitor query from backend...")
+            worker = Worker(self._run_monitor_batch_backend, base_url, api_key, sign_status, limit, insecure)
+            worker.signals.done.connect(self._on_monitor_done)
+            self.pool.start(worker)
+            return
+
         token = self.token_input.text().strip()
         if not token:
             if not silent_if_no_token:
                 QMessageBox.warning(self, "Warning", "Token is empty")
             return
 
-        sign_status = int(self.monitor_status_combo.currentData())
-        self._last_monitor_sign_status = sign_status
-        limit = int(self.monitor_limit_spin.value())
-        insecure = self.tls_insecure_checkbox.isChecked()
-
         self._set_status("Running monitor query for all categories...")
         worker = Worker(self._run_monitor_batch, token, sign_status, limit, insecure)
         worker.signals.done.connect(self._on_monitor_done)
         self.pool.start(worker)
+
+    def _parse_category_whitelist_text(self) -> list[int]:
+        raw = self.whitelist_category_ids_input.text().strip()
+        if not raw:
+            return []
+        out: list[int] = []
+        for item in raw.split(","):
+            text = item.strip()
+            if not text:
+                continue
+            try:
+                cid = int(text)
+            except ValueError:
+                continue
+            if cid not in out and 1 <= cid <= 6:
+                out.append(cid)
+        return out
+
+    def _run_monitor_batch_backend(
+        self,
+        base_url: str,
+        api_key: str,
+        sign_status: int,
+        limit: int,
+        insecure: bool,
+    ) -> dict[int, dict[str, Any]]:
+        category_ids = self._parse_category_whitelist_text() or [cid for cid, _name in CATEGORIES]
+        result: dict[int, dict[str, Any]] = {}
+
+        for cid in category_ids:
+            path = f"/api/v1/courses/list?sign_status={int(sign_status)}&limit={int(limit)}&category_ids={cid}"
+            ok, msg, data = backend_signed_get(
+                base_url=base_url,
+                path=path,
+                api_key=api_key,
+                timeout=15.0,
+                insecure_tls=insecure,
+            )
+            items_obj = data.get("data") if isinstance(data, dict) else []
+            items = items_obj if isinstance(items_obj, list) else []
+            result[cid] = {
+                "ok": ok,
+                "message": msg,
+                "items": items,
+            }
+
+        # Keep all tabs stable even if category whitelist excludes some categories.
+        for cid, _name in CATEGORIES:
+            if cid not in result:
+                result[cid] = {
+                    "ok": True,
+                    "message": "skipped_by_whitelist",
+                    "items": [],
+                }
+        return result
 
     def _run_monitor_batch(
         self,

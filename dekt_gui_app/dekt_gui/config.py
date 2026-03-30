@@ -16,8 +16,14 @@ class AppConfig:
     gist_id: str = ""
     gist_filename: str = "bit_cookies.json"
     tencent_map_key: str = ""
-    tls_insecure: bool = False
+    tls_insecure: bool = True
     signup_queue_text: str = ""
+    backend_mode: bool = False
+    backend_base_url: str = "https://127.0.0.1:8000"
+    backend_api_key: str = ""
+    whitelist_category_ids: str = ""
+    whitelist_grade: str = ""
+    whitelist_academy: str = ""
 
 
 def _parse_dotenv_file(path: Path) -> dict[str, str]:
@@ -85,8 +91,14 @@ def load_config() -> AppConfig:
         gist_id=str(env.get("bit_sc_gist_id", "")),
         gist_filename=str(env.get("bit_sc_gist_filename", "bit_cookies.json")) or "bit_cookies.json",
         tencent_map_key=str(env.get("bit_sc_tencent_map_key", "")),
-        tls_insecure=_bool_from_str(env.get("bit_sc_tls_insecure", "false")),
+        tls_insecure=_bool_from_str(env.get("bit_sc_tls_insecure", "true")),
         signup_queue_text=_normalize_signup_queue_text(env.get("bit_sc_signup_list", "")),
+        backend_mode=_bool_from_str(env.get("bit_sc_backend_mode", "false")),
+        backend_base_url=str(env.get("bit_sc_backend_base_url", "https://127.0.0.1:8000")),
+        backend_api_key=str(env.get("bit_sc_backend_api_key", "")),
+        whitelist_category_ids=str(env.get("bit_sc_whitelist_category_ids", "")),
+        whitelist_grade=str(env.get("bit_sc_whitelist_grade", "")),
+        whitelist_academy=str(env.get("bit_sc_whitelist_academy", "")),
     )
 
     if not CONFIG_FILE.exists():
@@ -105,6 +117,12 @@ def load_config() -> AppConfig:
     cfg.tencent_map_key = str(data.get("tencent_map_key", cfg.tencent_map_key))
     cfg.tls_insecure = bool(data.get("tls_insecure", cfg.tls_insecure))
     cfg.signup_queue_text = str(data.get("signup_queue_text", cfg.signup_queue_text))
+    cfg.backend_mode = bool(data.get("backend_mode", cfg.backend_mode))
+    cfg.backend_base_url = str(data.get("backend_base_url", cfg.backend_base_url))
+    cfg.backend_api_key = str(data.get("backend_api_key", cfg.backend_api_key))
+    cfg.whitelist_category_ids = str(data.get("whitelist_category_ids", cfg.whitelist_category_ids))
+    cfg.whitelist_grade = str(data.get("whitelist_grade", cfg.whitelist_grade))
+    cfg.whitelist_academy = str(data.get("whitelist_academy", cfg.whitelist_academy))
     return cfg
 
 

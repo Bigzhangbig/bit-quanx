@@ -24,9 +24,8 @@ This app is independent from the existing JS scripts.
 
 ## TLS notes
 
-- The app uses the `certifi` CA bundle for TLS verification by default.
-- If your local network/proxy rewrites certificates, you can temporarily enable:
-	`Ignore TLS certificate verification (debug only)` in the Credentials tab.
+- The app allows insecure TLS (self-signed certificates) by default.
+- You can disable `Ignore TLS certificate verification (debug only)` in the Credentials tab to re-enable strict verification.
 
 ## Run
 
@@ -37,6 +36,27 @@ python -m venv .venv
 .venv/bin/python main.py
 ```
 
+## Backend Mode (Front/Back Split)
+
+Use this mode when GUI should only act as a client and keep runtime config on backend.
+
+1. Start backend service first (see `../dekt_backend/README.md`).
+2. Open GUI `Credentials` tab.
+3. Enable `Use backend mode (recommended for split architecture)`.
+4. Fill backend connection:
+	- `Backend base URL` (example: `http://127.0.0.1:8000`)
+	- `Backend API key` (must match backend `DEKT_BACKEND_API_KEY`)
+5. Click `Test backend connection` to verify `/health` and signed config read.
+6. Set or paste token in GUI, then click `Sync token to backend`.
+7. Fill whitelist fields (`category ids`, `grade`, `academy/college`) and click `Sync whitelist to backend`.
+8. Optional: click `Load whitelist from backend` to pull current server-side values.
+
+After backend mode is enabled:
+
+- `Verify token` uses backend `/api/v1/auth/verify`.
+- `Monitor` list and right-click `Signup/Cancel` use backend course APIs.
+- `Sign in/out` uses backend `checkin-info` and sign APIs.
+
 If `dekt_gui_app/.env` exists, the app will auto-read default values:
 
 - `bit_sc_token`
@@ -45,6 +65,9 @@ If `dekt_gui_app/.env` exists, the app will auto-read default values:
 - `bit_sc_gist_filename`
 - `bit_sc_tencent_map_key`
 - `bit_sc_tls_insecure` (optional, `true/false`)
+- `dekt_backend_mode` (optional, `true/false`)
+- `dekt_backend_base_url` (optional)
+- `dekt_backend_api_key` (optional)
 
 ## Package (macOS)
 
@@ -91,9 +114,22 @@ Note:
 - PyInstaller does not support building Windows `.exe` directly on macOS/Linux.
 - To package Windows version locally, run `build_windows.bat` on a Windows machine (or Windows VM).
 
-## Next milestones
+## Project status
 
-- Monitor page
+Current stage: **Alpha (manual workflow usable)**
+
+### Stage checklist
+
+- ✅ Credentials page (manual token / Gist / verify / local persistence)
+- ✅ Monitor page (manual refresh for all 6 categories, table actions)
+- ✅ Sign page (manual sign-in/sign-out with time-window checks)
+- ✅ Activities page (my activities list + detail dialog)
+- ✅ Course detail enhancements (cover, map preview, sectioned detail view)
+- ⏳ Signup queue page (UI not wired yet)
+- ⏳ Scheduler / background jobs (not started)
+
+### Next milestones
+
 - Signup queue page
-- Sign-in/sign-out page
 - Scheduler + background jobs
+- Better release process (artifact naming/versioning)
