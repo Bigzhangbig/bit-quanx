@@ -732,7 +732,7 @@ async function getWechatJumpLink(pagePath = '/pages/index/index') {
     const apiUrl = `https://qcbldekt.bit.edu.cn/api/generatescheme?path=${encodeURIComponent(pagePath)}`;
     
     try {
-        const result = await httpGet(apiUrl, {}, 1000, 0);
+        const result = await httpGet(apiUrl, {}, 3000, 0);
         
         if (result.code === 200 && result.data) {
             return result.data; // 返回 weixin://dl/business/?t=...

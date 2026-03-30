@@ -61,6 +61,7 @@ const CONFIG = {
         2: "进行中",
         3: "已结束"
     },
+    scriptMaxRuntimeMs: 60 * 1000,
     requestTimeoutMs: 15000,
     requestRetries: 1,
     // 报名接口
@@ -71,8 +72,14 @@ const CONFIG = {
 
 // 脚本入口
 (async () => {
+    let watchdogTimer = null;
     try {
-        await checkCourses();
+        await Promise.race([
+            checkCourses(),
+            new Promise((_, reject) => {
+                watchdogTimer = setTimeout(() => reject(new Error(`脚本运行超时(${CONFIG.scriptMaxRuntimeMs}ms)`)), CONFIG.scriptMaxRuntimeMs);
+            })
+        ]);
     } catch (e) {
         let openUrl = "weixin://";
         try {
@@ -80,8 +87,11 @@ const CONFIG = {
             if (dynamicUrl) openUrl = dynamicUrl;
         } catch (_) {}
         console.log(`[monitor] 未捕获异常: ${e}`);
-        $.msg("❌ 监控脚本异常", "", String(e), { "open-url": openUrl });
+        const errText = String(e);
+        const isTimeout = errText.includes("脚本运行超时");
+        $.msg(isTimeout ? "⏱ 监控超时已中断" : "❌ 监控脚本异常", "", errText, { "open-url": openUrl });
     } finally {
+        if (watchdogTimer) clearTimeout(watchdogTimer);
         finishOnce();
     }
 })();
@@ -734,7 +744,7 @@ async function getWechatJumpLink(pagePath = '/pages/index/index') {
     const apiUrl = `https://qcbldekt.bit.edu.cn/api/generatescheme?path=${encodeURIComponent(pagePath)}`;
     
     try {
-        const result = await httpGet(apiUrl, {}, 1000, 0);
+        const result = await httpGet(apiUrl, {}, 3000, 0);
         
         if (result.code === 200 && result.data) {
             return result.data; // 返回 weixin://dl/business/?t=...
