@@ -100,8 +100,8 @@ async function captureCreds() {
         return;
     }
 
-    // 指纹去重 + 冷却时间，减少 Gist 访问频率
-    const fp = stableStringify(current);
+    // 仅按 cookie 三项判重：cookie 一致就不上传
+    const fp = makeCookieFingerprint(current);
     const lastFp = $.getdata(CONFIG.lastPushFingerprintKey) || "";
     const nowSec = Math.floor(Date.now() / 1000);
     const lastTs = parseInt($.getdata(CONFIG.lastPushTsKey) || "0", 10) || 0;
@@ -109,7 +109,7 @@ async function captureCreds() {
     let needUpdate = true;
     if (fp === lastFp) {
         needUpdate = false;
-        console.log(`[${$.name}] 本地指纹未变化，跳过 Gist 更新`);
+        console.log(`[${$.name}] cookie 一致，跳过上传`);
     } else if (!prioritySync && nowSec - lastTs < CONFIG.minPushIntervalSec) {
         needUpdate = false;
         console.log(`[${$.name}] 命中更新冷却(${CONFIG.minPushIntervalSec}s)，暂不访问 Gist`);
@@ -128,6 +128,7 @@ function syncPendingToGistNonBlocking() {
     const nowSec = Math.floor(Date.now() / 1000);
     const lockTs = parseInt($.getdata(CONFIG.syncLockTsKey) || "0", 10) || 0;
     if (nowSec - lockTs < CONFIG.syncLockTtlSec) {
+        console.log(`[${$.name}] 同步锁生效，跳过本次上传触发`);
         return;
     }
 
@@ -195,6 +196,23 @@ async function syncPendingToGist() {
         console.log(`[${$.name}] 待同步数据不完整，已清理`);
         $.setdata("", CONFIG.pendingPayloadKey);
         return;
+    }
+
+    // 先检查远端 Gist 是否已是同一份 cookie；一致则不再重复上传。
+    const localCookieFp = makeCookieFingerprint(payload.current);
+    const gistCheck = await getGist();
+    if (gistCheck && gistCheck.ok && gistCheck.data) {
+        const remoteCookieFp = makeCookieFingerprint(gistCheck.data);
+        if (remoteCookieFp === localCookieFp) {
+            if (payload.fp) $.setdata(payload.fp, CONFIG.lastPushFingerprintKey);
+            if (payload.nowSec) $.setdata(String(payload.nowSec), CONFIG.lastPushTsKey);
+            $.setdata("", CONFIG.pendingPayloadKey);
+            console.log(`[${$.name}] Gist cookie 已一致，跳过上传`);
+            return;
+        }
+        console.log(`[${$.name}] Gist cookie 不一致，执行上传`);
+    } else {
+        console.log(`[${$.name}] Gist 对比失败，继续尝试上传`);
     }
 
     const result = await updateGist(
@@ -477,6 +495,14 @@ function stableStringify(obj) {
     JSON.stringify(obj, (key, value) => { allKeys.push(key); return value; });
     allKeys.sort();
     return JSON.stringify(obj, allKeys);
+}
+
+function makeCookieFingerprint(data) {
+    return stableStringify({
+        jsessionid: data && data.jsessionid ? data.jsessionid : null,
+        openid: data && data.openid ? data.openid : null,
+        idserial: data && data.idserial ? data.idserial : null
+    });
 }
 
 function parseBoxHeaders(str) {
