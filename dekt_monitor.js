@@ -323,44 +323,7 @@ function normalizeAuthToken(token) {
                         if (isNew || isPickupTarget || (status === 1)) {
                             
                             // --- 筛选逻辑 ---
-                            let isMatch = true;
-
-                            // 1. 学院筛选
-                            if (filterCollege !== "不限") {
-                                const collegeList = course.college || [];
-                                const department = course.department || "";
-                                
-                                // 匹配规则：
-                                // 1. 课程未限制学院 (collegeList为空) -> 匹配
-                                // 2. 课程限制列表中包含选中学院 -> 匹配
-                                // 3. 课程主办方(department)包含选中学院 -> 匹配
-                                const isUnlimited = collegeList.length === 0;
-                                const isTargeted = collegeList.some(c => c.includes(filterCollege));
-                                // const isOrganizer = department.includes(filterCollege); // 移除主办方匹配
-
-                                if (!isUnlimited && !isTargeted) {
-                                    isMatch = false;
-                                }
-                            }
-
-                            // 2. 年级筛选 (例如 "2025级" -> 2025)
-                            if (isMatch && filterGrade !== "不限") {
-                                const targetGrade = parseInt(filterGrade.replace("级", ""));
-                                const gradeList = course.grade || [];
-                                // 如果 gradeList 为空，通常表示不限年级，视为匹配；如果不为空，则需包含目标年级
-                                if (gradeList.length > 0 && !gradeList.includes(targetGrade)) {
-                                    isMatch = false;
-                                }
-                            }
-
-                            // 3. 类型筛选 (例如 "本科生")
-                            if (isMatch && filterType !== "不限") {
-                                const typeList = course.student_type || [];
-                                // 如果 typeList 为空，通常表示不限类型，视为匹配
-                                if (typeList.length > 0 && !typeList.includes(filterType)) {
-                                    isMatch = false;
-                                }
-                            }
+                            const isMatch = matchesCourseFilters(course, filterCollege, filterGrade, filterType);
 
                             if (isMatch) {
                                 if (isNew) hasUpdate = true;
@@ -374,13 +337,23 @@ function normalizeAuthToken(token) {
 
                                 // 自动设置报名ID (如果是未开始的课程)
                                 if (status === 1) {
+                                    // 兜底保护：待报名列表入列前再次校验筛选器，防止后续改动绕过筛选。
+                                    const passBeforeEnqueue = matchesCourseFilters(course, filterCollege, filterGrade, filterType);
+                                    if (!passBeforeEnqueue) {
+                                        if (isDebug) console.log(`[Debug][${cat.name}][ID:${course.id}] 未通过筛选器，跳过加入待报名列表`);
+                                        continue;
+                                    }
+
                                     // 1. 加入待报名列表
                                     let list = [];
                                     try { list = JSON.parse($.getdata(CONFIG.signupListKey) || "[]"); } catch(e){}
                                     if (!Array.isArray(list)) list = [];
                                     
                                     let listMsg = "";
-                                    if (!list.some(i => i.id == course.id)) {
+                                    if (!isCategoryAllowedForAuto) {
+                                        listMsg = "\n⚠️ 栏目在BoxJS自动报名黑名单中，未加入待报名列表";
+                                        if (isDebug) console.log(`[Debug][${cat.name}][ID:${course.id}] 命中BoxJS自动报名栏目黑名单，跳过入待报名列表`);
+                                    } else if (!list.some(i => i.id == course.id)) {
                                         list.push({ id: course.id, title: title, time: signTime });
                                         $.setdata(JSON.stringify(list), CONFIG.signupListKey);
                                         listMsg = "\n📝 已加入待报名列表";
@@ -669,6 +642,43 @@ function httpRequestWithRetry(method, options, timeout, retries) {
 
         attempt(retries);
     });
+}
+
+function matchesCourseFilters(course, filterCollege, filterGrade, filterType) {
+    let isMatch = true;
+
+    // 1. 学院筛选
+    if (filterCollege !== "不限") {
+        const collegeList = course.college || [];
+
+        // 课程未限制学院(列表为空)视为匹配；限制了则必须命中目标学院。
+        const isUnlimited = collegeList.length === 0;
+        const isTargeted = collegeList.some(c => c.includes(filterCollege));
+        if (!isUnlimited && !isTargeted) {
+            isMatch = false;
+        }
+    }
+
+    // 2. 年级筛选 (例如 "2025级" -> 2025)
+    if (isMatch && filterGrade !== "不限") {
+        const targetGrade = parseInt(String(filterGrade).replace("级", ""), 10);
+        const gradeList = course.grade || [];
+        // gradeList 为空通常表示不限年级，视为匹配。
+        if (gradeList.length > 0 && !gradeList.includes(targetGrade)) {
+            isMatch = false;
+        }
+    }
+
+    // 3. 类型筛选 (例如 "本科生")
+    if (isMatch && filterType !== "不限") {
+        const typeList = course.student_type || [];
+        // typeList 为空通常表示不限类型，视为匹配。
+        if (typeList.length > 0 && !typeList.includes(filterType)) {
+            isMatch = false;
+        }
+    }
+
+    return isMatch;
 }
 
 function parseDurationMinutes(value) {
