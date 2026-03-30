@@ -1,0 +1,35 @@
+name: Python CI
+
+on:
+  pull_request:
+  push:
+    paths:
+      - "dekt_backend/**"
+      - "dekt_gui_app/**"
+      - ".github/workflows/ci-python.yml"
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r dekt_backend/requirements.txt
+
+      - name: Syntax check
+        run: |
+          python -m compileall dekt_backend dekt_gui_app
+
+      - name: Run backend tests
+        run: |
+          pytest -q dekt_backend/tests
