@@ -5,9 +5,9 @@
  * 
  * 推荐规则（QuanX）：
  * [rewrite_local]
- * ^https:\/\/dkykt\.info\.bit\.edu\.cn\/.* url script-request-header https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/card_cookie.js
- * ^https:\/\/dkykt\.info\.bit\.edu\.cn\/.* url script-response-header https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/card_cookie.js
- * ^https:\/\/dkykt\.info\.bit\.edu\.cn\/.* url script-response-body https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/card_cookie.js
+ * ^https:\/\/dkykt\.info\.bit\.edu\.cn\/(home\/(openDingtalkLoginNew|openDingTalkHomePage|getUseridBindIdserialNew|queryUserFunciton|queryUserMessage)|myaccount\/querywechatUserLastInfo|selftrade\/(openQueryCardSelfTrade|queryCardSelfTradeList)) url script-request-header https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/card_cookie.js
+ * ^https:\/\/dkykt\.info\.bit\.edu\.cn\/(home\/(openDingtalkLoginNew|openDingTalkHomePage|getUseridBindIdserialNew|queryUserFunciton|queryUserMessage)|myaccount\/querywechatUserLastInfo|selftrade\/(openQueryCardSelfTrade|queryCardSelfTradeList)) url script-response-header https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/card_cookie.js
+ * ^https:\/\/dkykt\.info\.bit\.edu\.cn\/(home\/(openDingtalkLoginNew|openDingTalkHomePage|getUseridBindIdserialNew|queryUserFunciton|queryUserMessage)|myaccount\/querywechatUserLastInfo|selftrade\/(openQueryCardSelfTrade|queryCardSelfTradeList)) url script-response-body https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/card_cookie.js
  * 
  * [mitm]
  * hostname = dkykt.info.bit.edu.cn
@@ -21,17 +21,29 @@ const CONFIG = {
     gistFileNameKey: "bit_card_gist_filename",
     defaultFileName: "bit_card_cookies.json",
     idserialKey: "bit_card_idserial", // 学工号
-    headersKey: "bit_card_headers" // 存放各 API 请求头的 BoxJS 键
+    headersKey: "bit_card_headers", // 存放各 API 请求头的 BoxJS 键
+    pendingPayloadKey: "bit_card_pending_payload",
+    lastPushFingerprintKey: "bit_card_last_push_fingerprint",
+    lastPushTsKey: "bit_card_last_push_ts",
+    syncLockTsKey: "bit_card_sync_lock_ts",
+    minPushIntervalSec: 90,
+    syncLockTtlSec: 20,
+    rewriteCheckGistEachHit: true,
+    trackedPathRegex: /^\/(home\/(openDingtalkLoginNew|openDingTalkHomePage)|myaccount\/querywechatUserLastInfo|selftrade\/queryCardSelfTradeList)(\?.*)?$/i
 };
 
 (async () => {
-    if (typeof $request !== "undefined" || typeof $response !== "undefined") {
-        try {
+    try {
+        // 重写阶段：只采集并写本地，不发外网请求，避免影响业务请求时延。
+        // 任务阶段（无 $request/$response）：再同步到 Gist。
+        if (typeof $request !== "undefined" || typeof $response !== "undefined") {
             await captureCreds();
-        } catch (e) {
-            console.log(`[${$.name}] 脚本执行异常: ${e}`);
-            $.msg($.name, "脚本执行异常", e.toString());
+        } else {
+            await syncPendingToGist();
         }
+    } catch (e) {
+        console.log(`[${$.name}] 脚本执行异常: ${e}`);
+        $.msg($.name, "脚本执行异常", e.toString());
     }
     $done({});
 })();
@@ -42,6 +54,15 @@ async function captureCreds() {
     const url = ($request && $request.url) ? $request.url : "";
     const body = ($response && typeof $response.body === 'string') ? $response.body : "";
 
+    if (!isTrackedRequest(url)) {
+        return;
+    }
+
+    if (CONFIG.rewriteCheckGistEachHit) {
+        refreshFromGistNonBlocking();
+    }
+
+    const prevLocalJsession = $.getdata("bit_card_jsessionid") || null;
     const jsessionid = extractJsessionId(reqHeaders, resHeaders);
     const openid = extractOpenId({ url, reqHeaders, resHeaders, body });
     const idserial = extractIdSerial({ url, body });
@@ -51,56 +72,165 @@ async function captureCreds() {
 
     if (!jsessionid && !openid && !idserial) return; // 没有新线索，直接返回
 
-    // 读取远端 Gist 以便对比/补全
-    const gistResult = await getGist();
-    const gistData = gistResult && gistResult.ok ? (gistResult.data || null) : null;
-    if (gistResult && gistResult.failed) {
-        $.msg($.name, "获取 Gist 失败", gistResult.message || "无法获取远端数据，请检查配置或网络");
-    }
-
-    const mergedHeaders = mergeHeadersMap(collectedHeaders, (gistData && gistData.headers) || parseBoxHeaders($.getdata(CONFIG.headersKey)));
+    // 本地优先，避免每次触发都访问 Gist
+    const mergedHeaders = mergeHeadersMap(collectedHeaders, parseBoxHeaders($.getdata(CONFIG.headersKey)));
 
     const current = {
-        jsessionid: jsessionid || (gistData && gistData.jsessionid) || $.getdata("bit_card_jsessionid") || null,
-        openid: openid || (gistData && gistData.openid) || $.getdata("bit_card_openid") || null,
-        idserial: idserial || (gistData && gistData.idserial) || $.getdata(CONFIG.idserialKey) || null,
+        jsessionid: jsessionid || $.getdata("bit_card_jsessionid") || null,
+        openid: openid || $.getdata("bit_card_openid") || null,
+        idserial: idserial || $.getdata(CONFIG.idserialKey) || null,
         headers: mergedHeaders
     };
 
+    // 关键凭证本地立即更新，保证“最新 cookie”不依赖 Gist 同步结果。
+    if (current.jsessionid) $.setdata(current.jsessionid, "bit_card_jsessionid");
+    if (current.openid) $.setdata(current.openid, "bit_card_openid");
+    if (current.idserial) $.setdata(current.idserial, CONFIG.idserialKey);
+    if (current.headers && Object.keys(current.headers).length) {
+        $.setdata(JSON.stringify(current.headers), CONFIG.headersKey);
+    }
+
+    // JSESSIONID 发生变化时，视为高优先级：即使在冷却窗口也要排队同步。
+    const jsessionRotated = !!(jsessionid && prevLocalJsession && jsessionid !== prevLocalJsession);
+    const firstCapturedJsession = !!(jsessionid && !prevLocalJsession);
+    const prioritySync = jsessionRotated || firstCapturedJsession;
+
     if (!current.jsessionid || !current.openid) {
         // 信息仍不完整，先落本地，等待下一次补全
-        if (jsessionid) $.setdata(jsessionid, "bit_card_jsessionid");
-        if (openid) $.setdata(openid, "bit_card_openid");
-        if (idserial) $.setdata(idserial, CONFIG.idserialKey);
-        if (mergedHeaders && Object.keys(mergedHeaders).length) $.setdata(JSON.stringify(mergedHeaders), CONFIG.headersKey);
         console.log(`[${$.name}] 捕获到部分信息，已先写入本地：JSESSIONID=${truncate(jsessionid)} openid=${truncate(openid)} idserial=${truncate(idserial)}`);
         return;
     }
 
-    // 比较是否需要更新远端
+    // 指纹去重 + 冷却时间，减少 Gist 访问频率
+    const fp = stableStringify(current);
+    const lastFp = $.getdata(CONFIG.lastPushFingerprintKey) || "";
+    const nowSec = Math.floor(Date.now() / 1000);
+    const lastTs = parseInt($.getdata(CONFIG.lastPushTsKey) || "0", 10) || 0;
+
     let needUpdate = true;
-    if (gistData && gistData.jsessionid === current.jsessionid && gistData.openid === current.openid && gistData.idserial === current.idserial && headersEqual((gistData && gistData.headers) || {}, current.headers || {})) {
+    if (fp === lastFp) {
         needUpdate = false;
-        console.log(`[${$.name}] 凭证与 Gist 一致，跳过更新`);
-    } else if (!gistData) {
-        console.log(`[${$.name}] 未能获取 Gist 数据或 Gist 为空，将执行强制更新`);
+        console.log(`[${$.name}] 本地指纹未变化，跳过 Gist 更新`);
+    } else if (!prioritySync && nowSec - lastTs < CONFIG.minPushIntervalSec) {
+        needUpdate = false;
+        console.log(`[${$.name}] 命中更新冷却(${CONFIG.minPushIntervalSec}s)，暂不访问 Gist`);
+    } else if (prioritySync) {
+        console.log(`[${$.name}] 关键 cookie 发生变化，强制入队同步`);
     }
 
     if (needUpdate) {
-        console.log(`[${$.name}] 检测到新/补全的凭证，准备更新 Gist...`);
-        console.log(`JSESSIONID: ${current.jsessionid}`);
-        console.log(`OpenID: ${current.openid}`);
-
-        const success = await updateGist(current.jsessionid, current.openid, current.idserial, current.headers || {});
-        if (success) {
-            $.setdata(current.jsessionid, "bit_card_jsessionid");
-            $.setdata(current.openid, "bit_card_openid");
-            if (current.idserial) $.setdata(current.idserial, CONFIG.idserialKey);
-            if (current.headers && Object.keys(current.headers).length) $.setdata(JSON.stringify(current.headers), CONFIG.headersKey);
-        } else {
-            $.msg($.name, "凭证更新失败", "同步到 Gist 失败，请查看日志");
-        }
+        // 重写链路只排队，不访问 Gist，避免阻塞网络请求。
+        queuePendingPayload(current, fp, nowSec, prioritySync);
+        syncPendingToGistNonBlocking();
     }
+}
+
+function syncPendingToGistNonBlocking() {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const lockTs = parseInt($.getdata(CONFIG.syncLockTsKey) || "0", 10) || 0;
+    if (nowSec - lockTs < CONFIG.syncLockTtlSec) {
+        return;
+    }
+
+    $.setdata(String(nowSec), CONFIG.syncLockTsKey);
+    syncPendingToGist().catch((e) => {
+        console.log(`[${$.name}] 非阻塞同步失败: ${e}`);
+    }).finally(() => {
+        $.setdata("", CONFIG.syncLockTsKey);
+    });
+}
+
+function refreshFromGistNonBlocking() {
+    getGist().then((gistResult) => {
+        if (!gistResult || !gistResult.ok || !gistResult.data) return;
+        const remote = gistResult.data;
+
+        const localJ = $.getdata("bit_card_jsessionid") || null;
+        const localO = $.getdata("bit_card_openid") || null;
+        const localI = $.getdata(CONFIG.idserialKey) || null;
+
+        let changed = false;
+        if (remote.jsessionid && remote.jsessionid !== localJ) {
+            $.setdata(remote.jsessionid, "bit_card_jsessionid");
+            changed = true;
+        }
+        if (remote.openid && remote.openid !== localO) {
+            $.setdata(remote.openid, "bit_card_openid");
+            changed = true;
+        }
+        if (remote.idserial && remote.idserial !== localI) {
+            $.setdata(remote.idserial, CONFIG.idserialKey);
+            changed = true;
+        }
+        if (remote.headers && Object.keys(remote.headers).length) {
+            const merged = mergeHeadersMap(parseBoxHeaders($.getdata(CONFIG.headersKey)), remote.headers);
+            $.setdata(JSON.stringify(merged), CONFIG.headersKey);
+            changed = true;
+        }
+
+        if (changed) {
+            console.log(`[${$.name}] 已从 Gist 回灌最新凭据到本地`);
+        }
+    }).catch((e) => {
+        console.log(`[${$.name}] 非阻塞 Gist 检查失败: ${e}`);
+    });
+}
+
+async function syncPendingToGist() {
+    const raw = $.getdata(CONFIG.pendingPayloadKey);
+    if (!raw) {
+        console.log(`[${$.name}] 无待同步数据，跳过`);
+        return;
+    }
+
+    let payload;
+    try {
+        payload = JSON.parse(raw);
+    } catch {
+        console.log(`[${$.name}] 待同步数据损坏，已清理`);
+        $.setdata("", CONFIG.pendingPayloadKey);
+        return;
+    }
+
+    if (!payload || !payload.current || !payload.current.jsessionid || !payload.current.openid) {
+        console.log(`[${$.name}] 待同步数据不完整，已清理`);
+        $.setdata("", CONFIG.pendingPayloadKey);
+        return;
+    }
+
+    const success = await updateGist(
+        payload.current.jsessionid,
+        payload.current.openid,
+        payload.current.idserial,
+        payload.current.headers || {}
+    );
+
+    if (success) {
+        $.setdata(payload.current.jsessionid, "bit_card_jsessionid");
+        $.setdata(payload.current.openid, "bit_card_openid");
+        if (payload.current.idserial) $.setdata(payload.current.idserial, CONFIG.idserialKey);
+        if (payload.current.headers && Object.keys(payload.current.headers).length) {
+            $.setdata(JSON.stringify(payload.current.headers), CONFIG.headersKey);
+        }
+        if (payload.fp) $.setdata(payload.fp, CONFIG.lastPushFingerprintKey);
+        if (payload.nowSec) $.setdata(String(payload.nowSec), CONFIG.lastPushTsKey);
+        $.setdata("", CONFIG.pendingPayloadKey);
+        console.log(`[${$.name}] 待同步数据已推送到 Gist`);
+    } else {
+        $.msg($.name, "凭证更新失败", "任务同步到 Gist 失败，将保留待同步数据下次重试");
+    }
+}
+
+function queuePendingPayload(current, fp, nowSec, prioritySync = false) {
+    const packet = {
+        current,
+        fp,
+        nowSec,
+        prioritySync,
+        queued_at: new Date().toISOString()
+    };
+    $.setdata(JSON.stringify(packet), CONFIG.pendingPayloadKey);
+    console.log(`[${$.name}] 已写入待同步队列: JSESSIONID=${truncate(current.jsessionid)} openid=${truncate(current.openid)}`);
 }
 
 function extractJsessionId(reqHeaders, resHeaders) {
@@ -338,13 +468,35 @@ function collectApiHeaders($req, headers) {
 function sanitizeHeaders(h) {
     const lower = {};
     for (const k in h) lower[k.toLowerCase()] = h[k];
-    const omit = new Set(['content-length', 'host', 'connection', 'accept-encoding']);
+
+    // 仅保留程序实际需要的头（参考当前 Python 程序 dkykt_api.py 的请求头需求）
+    const allow = new Set([
+        'user-agent',
+        'accept',
+        'accept-language',
+        'content-type',
+        'x-requested-with',
+        'origin',
+        'referer',
+        'upgrade-insecure-requests'
+    ]);
+
     const keep = {};
     for (const k in lower) {
-        if (omit.has(k)) continue;
+        if (!allow.has(k)) continue;
         keep[k] = lower[k];
     }
     return keep;
+}
+
+function isTrackedRequest(url) {
+    if (!url) return false;
+    try {
+        const u = new URL(url);
+        return CONFIG.trackedPathRegex.test(u.pathname || '/');
+    } catch {
+        return false;
+    }
 }
 
 function mergeHeadersMap(newMap, baseMap) {

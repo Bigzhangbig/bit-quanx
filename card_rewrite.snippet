@@ -1,12 +1,10 @@
 #!name = 北理工校园卡Cookie获取
-#!desc = 用于获取北理工校园卡的Cookie，需在MITM中添加主机名 dkykt.info.bit.edu.cn
+#!desc = 获取北理工校园卡关键凭据（JSESSIONID/openid），最小匹配+任务异步同步
 #!author = Copilot
 #!homepage = https://github.com/Bigzhangbig/bit-dekt-quanx
 
 #[rewrite_local]
-^https:\/\/dkykt\.info\.bit\.edu\.cn\/.* url script-request-header https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/card_cookie.js
-^https:\/\/dkykt\.info\.bit\.edu\.cn\/.* url script-response-header https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/card_cookie.js
-^https:\/\/dkykt\.info\.bit\.edu\.cn\/.* url script-response-body https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/card_cookie.js
+^https:\/\/dkykt\.info\.bit\.edu\.cn\/(home\/(openDingtalkLoginNew|openDingTalkHomePage)|myaccount\/querywechatUserLastInfo|selftrade\/queryCardSelfTradeList) url script-request-header https://raw.githubusercontent.com/Bigzhangbig/bit-dekt-quanx/main/card_cookie.js
 
 #[mitm]
 hostname = dkykt.info.bit.edu.cn
