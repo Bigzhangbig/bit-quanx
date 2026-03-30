@@ -212,7 +212,8 @@ async function syncPendingToGist() {
         }
         console.log(`[${$.name}] Gist cookie 不一致，执行上传`);
     } else {
-        console.log(`[${$.name}] Gist 对比失败，继续尝试上传`);
+        console.log(`[${$.name}] Gist 对比失败，取消上传并结束本次执行`);
+        return;
     }
 
     const result = await updateGist(
@@ -235,7 +236,7 @@ async function syncPendingToGist() {
         console.log(`[${$.name}] 待同步数据已推送到 Gist: status=${result.statusCode || 'unknown'} jsessionid=${truncate(payload.current.jsessionid)} openid=${truncate(payload.current.openid)} idserial=${truncate(payload.current.idserial)} body=${summarizeResponseBody(result.responseBody)}`);
     } else {
         console.log(`[${$.name}] Gist 上传失败: status=${result.statusCode || 'unknown'} body=${summarizeResponseBody(result.responseBody)} reason=${result.message || 'unknown'}`);
-        $.msg($.name, "凭证更新失败", "任务同步到 Gist 失败，将保留待同步数据下次重试");
+        return;
     }
 }
 
