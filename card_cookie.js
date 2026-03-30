@@ -1,7 +1,7 @@
 /*
  * 脚本名称：北理工校园卡-获取Cookie
  * 作者：Copilot for User
- * 描述：从请求/响应多信源提取 JSESSIONID 与 openid（URL/Cookie/Referer/Location/响应体），并与 Gist 对比后按需更新。
+ * 描述：严格按抓包字段提取 JSESSIONID/openid/idserial（仅请求 Cookie、URL 参数、请求体参数），并按需同步到 Gist。
  * 
  * 推荐规则（QuanX）：
  * [rewrite_local]
@@ -50,9 +50,8 @@ const CONFIG = {
 
 async function captureCreds() {
     const reqHeaders = ($request && $request.headers) ? $request.headers : {};
-    const resHeaders = ($response && $response.headers) ? $response.headers : {};
     const url = ($request && $request.url) ? $request.url : "";
-    const body = ($response && typeof $response.body === 'string') ? $response.body : "";
+    const reqBody = ($request && typeof $request.body === 'string') ? $request.body : "";
 
     if (!isTrackedRequest(url)) {
         return;
@@ -63,9 +62,9 @@ async function captureCreds() {
     }
 
     const prevLocalJsession = $.getdata("bit_card_jsessionid") || null;
-    const jsessionid = extractJsessionId(reqHeaders, resHeaders);
-    const openid = extractOpenId({ url, reqHeaders, resHeaders, body });
-    const idserial = extractIdSerial({ url, body });
+    const jsessionid = extractJsessionId(reqHeaders);
+    const openid = extractOpenId({ url, reqHeaders, reqBody });
+    const idserial = extractIdSerial({ url, reqBody });
 
     // 采集并归档本次请求的头部，用于后续 API 复用
     const collectedHeaders = collectApiHeaders($request, reqHeaders);
@@ -198,14 +197,14 @@ async function syncPendingToGist() {
         return;
     }
 
-    const success = await updateGist(
+    const result = await updateGist(
         payload.current.jsessionid,
         payload.current.openid,
         payload.current.idserial,
         payload.current.headers || {}
     );
 
-    if (success) {
+    if (result.ok) {
         $.setdata(payload.current.jsessionid, "bit_card_jsessionid");
         $.setdata(payload.current.openid, "bit_card_openid");
         if (payload.current.idserial) $.setdata(payload.current.idserial, CONFIG.idserialKey);
@@ -215,8 +214,9 @@ async function syncPendingToGist() {
         if (payload.fp) $.setdata(payload.fp, CONFIG.lastPushFingerprintKey);
         if (payload.nowSec) $.setdata(String(payload.nowSec), CONFIG.lastPushTsKey);
         $.setdata("", CONFIG.pendingPayloadKey);
-        console.log(`[${$.name}] 待同步数据已推送到 Gist`);
+        console.log(`[${$.name}] 待同步数据已推送到 Gist: status=${result.statusCode || 'unknown'} jsessionid=${truncate(payload.current.jsessionid)} openid=${truncate(payload.current.openid)} idserial=${truncate(payload.current.idserial)} body=${summarizeResponseBody(result.responseBody)}`);
     } else {
+        console.log(`[${$.name}] Gist 上传失败: status=${result.statusCode || 'unknown'} body=${summarizeResponseBody(result.responseBody)} reason=${result.message || 'unknown'}`);
         $.msg($.name, "凭证更新失败", "任务同步到 Gist 失败，将保留待同步数据下次重试");
     }
 }
@@ -233,87 +233,45 @@ function queuePendingPayload(current, fp, nowSec, prioritySync = false) {
     console.log(`[${$.name}] 已写入待同步队列: JSESSIONID=${truncate(current.jsessionid)} openid=${truncate(current.openid)}`);
 }
 
-function extractJsessionId(reqHeaders, resHeaders) {
+function extractJsessionId(reqHeaders) {
     const cookie = pickHeader(reqHeaders, 'cookie');
     if (cookie) {
         const m = /JSESSIONID=([^;]+)/i.exec(cookie);
         if (m) return m[1];
     }
-    const setCookie = normalizeSetCookie(resHeaders);
-    if (setCookie) {
-        const m = /JSESSIONID=([^;]+)/i.exec(setCookie);
-        if (m) return m[1];
-    }
     return null;
 }
 
-function extractOpenId({ url, reqHeaders, resHeaders, body }) {
-    // 1) URL 上的 openid=xxx
-    const urlMatch = /[?&#]openid=([^&\s"'>]+)/i.exec(url || "");
-    if (urlMatch) return decodeURIComponent(urlMatch[1]);
+function extractOpenId({ url, reqHeaders, reqBody }) {
+    // 严格按抓包字段：先读请求 URL 参数 openid，再读请求 Cookie openid，最后读请求体 openid。
+    let m = /[?&#]openid=([^&\s"'>]+)/i.exec(url || "");
+    if (m) return decodeURIComponent(m[1]);
 
-    // 2) 请求 Cookie 中的 openid
     const cookie = pickHeader(reqHeaders, 'cookie');
     if (cookie) {
-        const m = /(?:^|;\s*)openid=([^;]+)/i.exec(cookie);
+        m = /(?:^|;\s*)openid=([^;]+)/i.exec(cookie);
         if (m) return m[1];
     }
 
-    // 3) Referer 上的 openid
-    const referer = pickHeader(reqHeaders, 'referer');
-    if (referer) {
-        const m = /[?&#]openid=([^&\s"'>]+)/i.exec(referer);
+    if (reqBody) {
+        m = /(?:^|[&\s])openid=([^&\s]+)/i.exec(reqBody);
         if (m) return decodeURIComponent(m[1]);
-    }
-
-    // 4) 响应 Location 重定向上的 openid
-    const location = pickHeader(resHeaders, 'location');
-    if (location) {
-        const m = /[?&#]openid=([^&\s"'>]+)/i.exec(location);
-        if (m) return decodeURIComponent(m[1]);
-    }
-
-    // 5) 响应 Set-Cookie 中的 openid
-    const setCookie = normalizeSetCookie(resHeaders);
-    if (setCookie) {
-        const m = /(?:^|;\s*)openid=([^;]+)/i.exec(setCookie);
-        if (m) return m[1];
-    }
-
-    // 6) 响应体中常见形态："openid":"..." 或 内嵌 URL 参数
-    if (body) {
-        let m = /"openid"\s*:\s*"([^"]+)"/i.exec(body);
-        if (m) return m[1];
-        m = /[?&#]openid=([^&\s"'>]+)/i.exec(body);
-        if (m) return decodeURIComponent(m[1]);
-        // 微信 openid 常以 'o' 开头 28 位，可做兜底（尽量保守）
-        m = /\b(o[\w-]{27})\b/.exec(body);
-        if (m) return m[1];
     }
 
     return null;
 }
 
-function extractIdSerial({ url, body }) {
-    // 1) URL 参数 idserial= 或 idSerial=
+function extractIdSerial({ url, reqBody }) {
+    // 严格按抓包字段：URL 参数和请求体参数。
     let m = /[?&#]idserial=([^&\s"'>]+)/i.exec(url || "");
     if (m) return decodeURIComponent(m[1]);
     m = /[?&#]idSerial=([^&\s"'>]+)/i.exec(url || "");
     if (m) return decodeURIComponent(m[1]);
-    // 2) HTML hidden input 或脚本变量
-    if (body) {
-        m = /<input[^>]+id=["']idserial["'][^>]*value=["']([^"'>]+)["']/i.exec(body);
-        if (m) return m[1];
-        m = /name=["']idserial["'][^>]*value=["']([^"'>]+)["']/i.exec(body);
-        if (m) return m[1];
-        m = /var\s+idserial\s*=\s*['"]([^'";]+)['"]/i.exec(body);
-        if (m) return m[1];
-        // 3) 常见数字学工号：8-12位数字，和“学工”或“idserial”邻近
-        m = /(?:学工号|idserial)[^\d]{0,20}(\d{8,12})/i.exec(body);
-        if (m) return m[1];
-        // 4) 兜底：找到多个数字后再确认长度，在余额页内经常出现 <p>1234567890</p>
-        m = />(\d{8,12})<\/p>/i.exec(body);
-        if (m) return m[1];
+    if (reqBody) {
+        m = /(?:^|[&\s])idserial=([^&\s]+)/i.exec(reqBody);
+        if (m) return decodeURIComponent(m[1]);
+        m = /(?:^|[&\s])idSerial=([^&\s]+)/i.exec(reqBody);
+        if (m) return decodeURIComponent(m[1]);
     }
     return null;
 }
@@ -323,13 +281,6 @@ function pickHeader(headers, key) {
     const lower = Object.create(null);
     for (const k in headers) lower[k.toLowerCase()] = headers[k];
     return lower[key.toLowerCase()] || null;
-}
-
-function normalizeSetCookie(headers) {
-    const raw = pickHeader(headers, 'set-cookie');
-    if (!raw) return null;
-    if (Array.isArray(raw)) return raw.join('; ');
-    return String(raw);
 }
 
 function truncate(v) {
@@ -395,7 +346,7 @@ async function updateGist(jsessionid, openid, idserial, headersMap) {
 
     if (!githubToken || !gistId) {
         $.msg($.name, "配置缺失", "请在 BoxJS 中配置 GitHub Token 和 Gist ID");
-        return false;
+        return { ok: false, statusCode: 0, responseBody: "", message: "配置缺失" };
     }
 
     const content = JSON.stringify({
@@ -427,21 +378,28 @@ async function updateGist(jsessionid, openid, idserial, headersMap) {
             $task.fetch(request).then(
                 response => {
                     if (response.statusCode >= 200 && response.statusCode < 300) {
-                        resolve(true);
+                        resolve({ ok: true, statusCode: response.statusCode, responseBody: response.body || "", message: "ok" });
                     } else {
                         console.log(`[${$.name}] Gist 更新失败: ${response.statusCode} ${response.body}`);
-                        resolve(false);
+                        resolve({ ok: false, statusCode: response.statusCode, responseBody: response.body || "", message: "http_error" });
                     }
                 },
                 reason => {
                     console.log(`[${$.name}] Gist 更新出错: ${reason.error}`);
-                    resolve(false);
+                    resolve({ ok: false, statusCode: 0, responseBody: "", message: reason.error || "network_error" });
                 }
             );
         } else {
-            resolve(false);
+            resolve({ ok: false, statusCode: 0, responseBody: "", message: "当前环境不支持网络请求" });
         }
     });
+}
+
+function summarizeResponseBody(body, maxLen = 180) {
+    if (!body) return "";
+    const oneLine = String(body).replace(/\s+/g, " ").trim();
+    if (oneLine.length <= maxLen) return oneLine;
+    return oneLine.slice(0, maxLen) + "...";
 }
 
 // --- Env Polyfill ---
