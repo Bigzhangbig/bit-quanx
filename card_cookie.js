@@ -25,9 +25,7 @@ const CONFIG = {
     pendingPayloadKey: "bit_card_pending_payload",
     lastPushFingerprintKey: "bit_card_last_push_fingerprint",
     lastPushTsKey: "bit_card_last_push_ts",
-    syncLockTsKey: "bit_card_sync_lock_ts",
     minPushIntervalSec: 90,
-    syncLockTtlSec: 20,
     rewriteCheckGistEachHit: true,
     trackedPathRegex: /^\/(home\/(openDingtalkLoginNew|openDingTalkHomePage)|myaccount\/querywechatUserLastInfo|selftrade\/queryCardSelfTradeList)(\?.*)?$/i
 };
@@ -125,18 +123,8 @@ async function captureCreds() {
 }
 
 async function syncPendingToGistNonBlocking() {
-    const nowSec = Math.floor(Date.now() / 1000);
-    const lockTs = parseInt($.getdata(CONFIG.syncLockTsKey) || "0", 10) || 0;
-    if (nowSec - lockTs < CONFIG.syncLockTtlSec) {
-        console.log(`[${$.name}] 同步锁生效，跳过本次上传触发`);
-        return;
-    }
-
-    $.setdata(String(nowSec), CONFIG.syncLockTsKey);
     await syncPendingToGist().catch((e) => {
         console.log(`[${$.name}] 非阻塞同步失败: ${e}`);
-    }).finally(() => {
-        $.setdata("", CONFIG.syncLockTsKey);
     });
 }
 
