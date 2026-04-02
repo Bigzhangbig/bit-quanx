@@ -48,6 +48,8 @@ from .api_client import (
     fetch_token_from_gist,
     get_checkin_info,
     get_course_detail,
+    get_qrcode_image,
+    get_qrcode_url,
     get_user_id,
     list_my_courses,
     list_my_course_ids,
@@ -95,7 +97,7 @@ class Worker(QRunnable):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("DEKT Desktop (alpha)")
+        self.setWindowTitle("DEKT 桌面版（测试版）")
         self.resize(900, 600)
 
         self.pool = QThreadPool.globalInstance()
@@ -105,12 +107,13 @@ class MainWindow(QMainWindow):
         self._pixmap_cache: dict[str, QPixmap | None] = {}
         self._cover_waiters: dict[str, list[tuple[QTableWidget, int, int]]] = {}
         self._cover_loading_urls: set[str] = set()
+        self._activities_items_cache: list[dict[str, Any]] = []
 
         self.token_input = QLineEdit(self.config.token)
-        self.token_input.setPlaceholderText("Bearer xxx or raw token")
+        self.token_input.setPlaceholderText("Bearer xxx 或原始 token")
 
         self.github_token_input = QLineEdit(self.config.github_token)
-        self.github_token_input.setPlaceholderText("GitHub personal access token")
+        self.github_token_input.setPlaceholderText("GitHub 个人访问令牌")
         self.github_token_input.setEchoMode(QLineEdit.EchoMode.Password)
 
         self.gist_id_input = QLineEdit(self.config.gist_id)
@@ -120,19 +123,19 @@ class MainWindow(QMainWindow):
         self.gist_filename_input.setPlaceholderText("bit_cookies.json")
 
         self.tencent_map_key_input = QLineEdit(self.config.tencent_map_key)
-        self.tencent_map_key_input.setPlaceholderText("Tencent map key (for static map)")
+        self.tencent_map_key_input.setPlaceholderText("腾讯地图 Key（静态地图）")
 
-        self.tls_insecure_checkbox = QCheckBox("Ignore TLS certificate verification (debug only)")
+        self.tls_insecure_checkbox = QCheckBox("忽略 TLS 证书校验（仅调试）")
         self.tls_insecure_checkbox.setChecked(self.config.tls_insecure)
 
-        self.backend_mode_checkbox = QCheckBox("Use backend mode (signed API calls)")
+        self.backend_mode_checkbox = QCheckBox("启用后端模式（签名 API 调用）")
         self.backend_mode_checkbox.setChecked(self.config.backend_mode)
 
         self.backend_base_url_input = QLineEdit(self.config.backend_base_url)
         self.backend_base_url_input.setPlaceholderText("https://backend.example.com")
 
         self.backend_api_key_input = QLineEdit(self.config.backend_api_key)
-        self.backend_api_key_input.setPlaceholderText("Backend API key")
+        self.backend_api_key_input.setPlaceholderText("后端 API Key")
         self.backend_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
 
         self.whitelist_category_ids_input = QLineEdit(self.config.whitelist_category_ids)
@@ -180,6 +183,10 @@ class MainWindow(QMainWindow):
         self.sign_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.sign_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.sign_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.sign_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.sign_table.customContextMenuRequested.connect(
+            lambda pos: self._show_sign_context_menu(self.sign_table, pos)
+        )
         self.sign_table.itemDoubleClicked.connect(self._on_sign_item_double_clicked)
 
         self.activities_table = QTableWidget(0, 7)
@@ -195,30 +202,40 @@ class MainWindow(QMainWindow):
         self.activities_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.activities_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.activities_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.activities_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.activities_table.customContextMenuRequested.connect(
+            lambda pos: self._show_activities_context_menu(self.activities_table, pos)
+        )
         self.activities_table.itemDoubleClicked.connect(self._on_activities_item_double_clicked)
 
-        self.status_label = QLabel("Ready")
+        self.activities_checkin_filter_combo = QComboBox()
+        self.activities_checkin_filter_combo.addItem("全部活动", False)
+        self.activities_checkin_filter_combo.addItem("仅有打卡", True)
+        self.activities_checkin_filter_combo.setCurrentIndex(1 if self.config.activities_has_checkin_only else 0)
+        self.activities_checkin_filter_combo.currentIndexChanged.connect(self._on_activities_filter_changed)
+
+        self.status_label = QLabel("就绪")
         self.log_box = QPlainTextEdit()
         self.log_box.setReadOnly(True)
 
         self._build_ui()
-        self._append_log("GUI initialized")
+        self._append_log("界面初始化完成")
 
     def _build_ui(self) -> None:
         root = QWidget()
         layout = QVBoxLayout(root)
 
         self.main_tabs = QTabWidget()
-        self.main_tabs.addTab(self._build_credentials_tab(), "Credentials")
-        self.main_tabs.addTab(self._build_monitor_tab(), "Monitor")
-        self.main_tabs.addTab(self._build_sign_tab(), "Sign")
-        self.main_tabs.addTab(self._build_activities_tab(), "Activities")
+        self.main_tabs.addTab(self._build_credentials_tab(), "凭据")
+        self.main_tabs.addTab(self._build_monitor_tab(), "监控")
+        self.main_tabs.addTab(self._build_sign_tab(), "打卡")
+        self.main_tabs.addTab(self._build_activities_tab(), "活动")
         self.main_tabs.currentChanged.connect(self._on_main_tab_changed)
 
         logs_panel = QWidget()
         logs_layout = QVBoxLayout(logs_panel)
         logs_layout.setContentsMargins(0, 0, 0, 0)
-        logs_layout.addWidget(QLabel("Logs"))
+        logs_layout.addWidget(QLabel("日志"))
         logs_layout.addWidget(self.log_box, 1)
 
         main_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -238,41 +255,41 @@ class MainWindow(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        cred_box = QGroupBox("Credentials")
+        cred_box = QGroupBox("凭据")
         form = QFormLayout(cred_box)
-        form.addRow("DEKT token", self.token_input)
-        form.addRow("GitHub token", self.github_token_input)
+        form.addRow("DEKT Token", self.token_input)
+        form.addRow("GitHub Token", self.github_token_input)
         form.addRow("Gist ID", self.gist_id_input)
-        form.addRow("Gist file", self.gist_filename_input)
-        form.addRow("Tencent map key", self.tencent_map_key_input)
+        form.addRow("Gist 文件", self.gist_filename_input)
+        form.addRow("腾讯地图 Key", self.tencent_map_key_input)
         form.addRow("TLS", self.tls_insecure_checkbox)
-        form.addRow("Backend mode", self.backend_mode_checkbox)
-        form.addRow("Backend URL", self.backend_base_url_input)
-        form.addRow("Backend API key", self.backend_api_key_input)
-        form.addRow("Whitelist categories", self.whitelist_category_ids_input)
-        form.addRow("Whitelist grade", self.whitelist_grade_input)
-        form.addRow("Whitelist academy", self.whitelist_academy_input)
+        form.addRow("后端模式", self.backend_mode_checkbox)
+        form.addRow("后端地址", self.backend_base_url_input)
+        form.addRow("后端 API Key", self.backend_api_key_input)
+        form.addRow("白名单栏目", self.whitelist_category_ids_input)
+        form.addRow("白名单年级", self.whitelist_grade_input)
+        form.addRow("白名单学院", self.whitelist_academy_input)
 
         btn_row = QHBoxLayout()
-        save_btn = QPushButton("Save credentials")
+        save_btn = QPushButton("保存凭据")
         save_btn.clicked.connect(self.on_save)
 
-        verify_btn = QPushButton("Verify token")
+        verify_btn = QPushButton("验证 Token")
         verify_btn.clicked.connect(self.on_verify_token)
 
-        pull_gist_btn = QPushButton("Load token from Gist")
+        pull_gist_btn = QPushButton("从 Gist 加载 Token")
         pull_gist_btn.clicked.connect(self.on_pull_gist)
 
-        backend_ping_btn = QPushButton("Test backend connection")
+        backend_ping_btn = QPushButton("测试后端连接")
         backend_ping_btn.clicked.connect(self.on_backend_ping)
 
-        backend_sync_token_btn = QPushButton("Sync token to backend")
+        backend_sync_token_btn = QPushButton("同步 Token 到后端")
         backend_sync_token_btn.clicked.connect(self.on_backend_sync_token)
 
-        backend_push_cfg_btn = QPushButton("Sync whitelist to backend")
+        backend_push_cfg_btn = QPushButton("同步白名单到后端")
         backend_push_cfg_btn.clicked.connect(self.on_backend_push_config)
 
-        backend_pull_cfg_btn = QPushButton("Load whitelist from backend")
+        backend_pull_cfg_btn = QPushButton("从后端加载白名单")
         backend_pull_cfg_btn.clicked.connect(self.on_backend_pull_config)
 
         btn_row.addWidget(save_btn)
@@ -294,7 +311,7 @@ class MainWindow(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        controls = QGroupBox("Manual monitor run")
+        controls = QGroupBox("手动监控查询")
         form = QFormLayout(controls)
 
         status_row = QWidget()
@@ -302,13 +319,13 @@ class MainWindow(QMainWindow):
         status_row_layout.setContentsMargins(0, 0, 0, 0)
         status_row_layout.addWidget(self.monitor_status_combo)
 
-        run_btn = QPushButton("Refresh now")
+        run_btn = QPushButton("立即刷新")
         run_btn.clicked.connect(lambda: self.on_monitor_once(silent_if_no_token=False))
         status_row_layout.addWidget(run_btn)
         status_row_layout.addStretch(1)
 
-        form.addRow("Sign status", status_row)
-        form.addRow("Limit", self.monitor_limit_spin)
+        form.addRow("活动状态", status_row)
+        form.addRow("数量上限", self.monitor_limit_spin)
 
         layout.addWidget(controls)
         layout.addWidget(self.monitor_result_tabs, 1)
@@ -318,7 +335,7 @@ class MainWindow(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        controls = QGroupBox("Sign-in/out")
+        controls = QGroupBox("签到/签退")
         row = QHBoxLayout(controls)
         refresh_btn = QPushButton("刷新活动")
         refresh_btn.clicked.connect(self.on_sign_refresh)
@@ -339,8 +356,10 @@ class MainWindow(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        controls = QGroupBox("My activities")
+        controls = QGroupBox("我的活动")
         row = QHBoxLayout(controls)
+        row.addWidget(QLabel("打卡筛选"))
+        row.addWidget(self.activities_checkin_filter_combo)
         refresh_btn = QPushButton("刷新我的活动")
         refresh_btn.clicked.connect(self.on_activities_refresh)
         row.addWidget(refresh_btn)
@@ -354,11 +373,11 @@ class MainWindow(QMainWindow):
         if index < 0:
             return
         tab_name = self.main_tabs.tabText(index)
-        if tab_name == "Monitor":
+        if tab_name == "监控":
             self.on_monitor_once(silent_if_no_token=True)
-        elif tab_name == "Sign":
+        elif tab_name == "打卡":
             self.on_sign_refresh(silent_if_no_token=True)
-        elif tab_name == "Activities":
+        elif tab_name == "活动":
             self.on_activities_refresh(silent_if_no_token=True)
 
     def on_sign_refresh(self, silent_if_no_token: bool = False) -> None:
@@ -368,19 +387,19 @@ class MainWindow(QMainWindow):
             api_key = self.backend_api_key_input.text().strip()
             if not base_url or not api_key:
                 if not silent_if_no_token:
-                    QMessageBox.warning(self, "Warning", "Backend URL/API key is empty")
+                    QMessageBox.warning(self, "提示", "后端地址或 API Key 为空")
                 return
 
-            self._set_status("Loading signable activities from backend...")
+            self._set_status("正在从后端加载可签到活动...")
             worker = Worker(self._fetch_my_courses_backend, base_url, api_key, insecure)
         else:
             token = self.token_input.text().strip()
             if not token:
                 if not silent_if_no_token:
-                    QMessageBox.warning(self, "Warning", "Token is empty")
+                    QMessageBox.warning(self, "提示", "Token 为空")
                 return
 
-            self._set_status("Loading signable activities...")
+            self._set_status("正在加载可签到活动...")
             worker = Worker(self._fetch_my_courses, token, insecure)
         worker.signals.done.connect(self._on_sign_refresh_done)
         self.pool.start(worker)
@@ -392,19 +411,19 @@ class MainWindow(QMainWindow):
             api_key = self.backend_api_key_input.text().strip()
             if not base_url or not api_key:
                 if not silent_if_no_token:
-                    QMessageBox.warning(self, "Warning", "Backend URL/API key is empty")
+                    QMessageBox.warning(self, "提示", "后端地址或 API Key 为空")
                 return
 
-            self._set_status("Loading my activities from backend...")
+            self._set_status("正在从后端加载我的活动...")
             worker = Worker(self._fetch_my_courses_backend, base_url, api_key, insecure)
         else:
             token = self.token_input.text().strip()
             if not token:
                 if not silent_if_no_token:
-                    QMessageBox.warning(self, "Warning", "Token is empty")
+                    QMessageBox.warning(self, "提示", "Token 为空")
                 return
 
-            self._set_status("Loading my activities...")
+            self._set_status("正在加载我的活动...")
             worker = Worker(self._fetch_my_courses, token, insecure)
         worker.signals.done.connect(self._on_activities_refresh_done)
         self.pool.start(worker)
@@ -435,7 +454,7 @@ class MainWindow(QMainWindow):
 
         items_obj = data.get("data") if isinstance(data, dict) else []
         items = items_obj if isinstance(items_obj, list) else []
-        return True, "OK", [i for i in items if isinstance(i, dict)]
+        return True, "成功", [i for i in items if isinstance(i, dict)]
 
     def _window_text(self, start: str, end: str) -> str:
         if start and end:
@@ -445,7 +464,7 @@ class MainWindow(QMainWindow):
     def _on_sign_refresh_done(self, result: tuple[bool, str, list[dict[str, Any]]]) -> None:
         ok, msg, items = result
         if not ok:
-            self._set_status(f"Load sign activities failed: {msg}")
+            self._set_status(f"加载可签到活动失败: {msg}")
             return
 
         self.sign_table.setRowCount(0)
@@ -465,11 +484,11 @@ class MainWindow(QMainWindow):
                 str(course.get("sign_out_end_time") or ""),
             )
 
-            # Sign 页只显示有签到或签退窗口的课程。
+            # 打卡 页只显示有签到或签退窗口的课程。
             if not sign_in_window and not sign_out_window:
                 continue
 
-            # Sign 页隐藏已结束活动：优先使用签退结束时间，其次签到结束时间。
+            # 打卡 页隐藏已结束活动：优先使用签退结束时间，其次签到结束时间。
             end_raw = str(course.get("sign_out_end_time") or course.get("sign_in_end_time") or "")
             end_dt = self._parse_time(end_raw)
             if end_dt is not None and end_dt < datetime.now():
@@ -504,13 +523,43 @@ class MainWindow(QMainWindow):
         if self.sign_table.columnWidth(2) > 420:
             self.sign_table.setColumnWidth(2, 420)
 
-        self._set_status(f"Sign activities loaded: {self.sign_table.rowCount()}")
+        self._set_status(f"可签到活动加载完成：{self.sign_table.rowCount()}")
 
     def _on_activities_refresh_done(self, result: tuple[bool, str, list[dict[str, Any]]]) -> None:
         ok, msg, items = result
         if not ok:
-            self._set_status(f"Load activities failed: {msg}")
+            self._set_status(f"加载活动失败: {msg}")
             return
+
+        self._activities_items_cache = [i for i in items if isinstance(i, dict)]
+        self._render_activities_table(self._filtered_activities_items())
+        total = len(self._activities_items_cache)
+        shown = self.activities_table.rowCount()
+        if shown == total:
+            self._set_status(f"活动加载完成：{shown}")
+        else:
+            self._set_status(f"活动加载完成：显示 {shown} / 总计 {total}")
+
+    def _has_checkin_window(self, course: dict[str, Any]) -> bool:
+        sign_in = self._window_text(
+            str(course.get("sign_in_start_time") or ""),
+            str(course.get("sign_in_end_time") or ""),
+        )
+        sign_out = self._window_text(
+            str(course.get("sign_out_start_time") or ""),
+            str(course.get("sign_out_end_time") or ""),
+        )
+        return bool(sign_in or sign_out)
+
+    def _activities_checkin_only(self) -> bool:
+        return bool(self.activities_checkin_filter_combo.currentData())
+
+    def _filtered_activities_items(self) -> list[dict[str, Any]]:
+        if not self._activities_checkin_only():
+            return list(self._activities_items_cache)
+        return [course for course in self._activities_items_cache if self._has_checkin_window(course)]
+
+    def _render_activities_table(self, items: list[dict[str, Any]]) -> None:
 
         self.activities_table.setRowCount(0)
         for row_idx, course in enumerate(items):
@@ -556,7 +605,16 @@ class MainWindow(QMainWindow):
         if self.activities_table.columnWidth(3) > 420:
             self.activities_table.setColumnWidth(3, 420)
 
-        self._set_status(f"Activities loaded: {self.activities_table.rowCount()}")
+    def _on_activities_filter_changed(self, _index: int) -> None:
+        if not self._activities_items_cache:
+            return
+        self._render_activities_table(self._filtered_activities_items())
+        total = len(self._activities_items_cache)
+        shown = self.activities_table.rowCount()
+        if shown == total:
+            self._set_status(f"活动筛选已更新：{shown}")
+        else:
+            self._set_status(f"活动筛选已更新：显示 {shown} / 总计 {total}")
 
     def _on_sign_item_double_clicked(self, item: QTableWidgetItem) -> None:
         self._open_detail_from_table_item(item)
@@ -590,10 +648,10 @@ class MainWindow(QMainWindow):
             base_url = self.backend_base_url_input.text().strip()
             api_key = self.backend_api_key_input.text().strip()
             if not base_url or not api_key:
-                QMessageBox.warning(self, "课程详情", "Backend URL/API key is empty")
+                QMessageBox.warning(self, "课程详情", "后端地址或 API Key 为空")
                 return
 
-            self._set_status(f"Loading course detail from backend: {course_id}")
+            self._set_status(f"正在从后端加载课程详情: {course_id}")
             worker = Worker(
                 self._load_course_detail_backend,
                 base_url,
@@ -608,10 +666,10 @@ class MainWindow(QMainWindow):
 
         token = self.token_input.text().strip()
         if not token:
-            QMessageBox.warning(self, "课程详情", "Token is empty")
+            QMessageBox.warning(self, "课程详情", "Token 为空")
             return
 
-        self._set_status(f"Loading course detail: {course_id}")
+        self._set_status(f"正在加载课程详情: {course_id}")
         worker = Worker(
             self._load_course_detail,
             token,
@@ -644,7 +702,7 @@ class MainWindow(QMainWindow):
     def on_sign_action(self, action: str) -> None:
         row = self.sign_table.currentRow()
         if row < 0:
-            QMessageBox.warning(self, "Warning", "请先选择一条活动")
+            QMessageBox.warning(self, "提示", "请先选择一条活动")
             return
 
         id_item = self.sign_table.item(row, 0)
@@ -652,12 +710,12 @@ class MainWindow(QMainWindow):
             return
         course_id_text = (id_item.text() or "").strip()
         if not course_id_text.isdigit():
-            QMessageBox.warning(self, "Warning", f"无效课程 ID: {course_id_text}")
+            QMessageBox.warning(self, "提示", f"无效课程 ID: {course_id_text}")
             return
 
         token = self.token_input.text().strip()
         if (not self.backend_mode_checkbox.isChecked()) and (not token):
-            QMessageBox.warning(self, "Warning", "Token is empty")
+            QMessageBox.warning(self, "提示", "Token 为空")
             return
 
         fallback_obj = id_item.data(Qt.ItemDataRole.UserRole)
@@ -666,7 +724,7 @@ class MainWindow(QMainWindow):
 
         course_id = int(course_id_text)
         insecure = self.tls_insecure_checkbox.isChecked()
-        self._set_status(f"Running {action} for {course_id}...")
+        self._set_status(f"正在执行 {action}（课程 {course_id}）...")
         worker = Worker(self._run_sign_action_task, token, course_id, action, fallback_obj, insecure)
         worker.signals.done.connect(self._on_sign_action_done)
         self.pool.start(worker)
@@ -806,12 +864,48 @@ class MainWindow(QMainWindow):
         menu = QMenu(table)
         signup_action = menu.addAction("报名")
         cancel_action = menu.addAction("取消报名")
+        menu.addSeparator()
+        qrcode_action = menu.addAction("查看二维码")
 
         selected = menu.exec(table.viewport().mapToGlobal(pos))
         if selected is signup_action:
             self._run_monitor_course_action("signup", course_item.text().strip())
         elif selected is cancel_action:
             self._run_monitor_course_action("cancel", course_item.text().strip())
+        elif selected is qrcode_action:
+            self._show_qrcode_dialog(table, row)
+
+    def _show_sign_context_menu(self, table: QTableWidget, pos) -> None:
+        row = table.rowAt(pos.y())
+        if row < 0:
+            return
+
+        course_item = table.item(row, 0)
+        if course_item is None:
+            return
+
+        menu = QMenu(table)
+        qrcode_action = menu.addAction("查看二维码")
+
+        selected = menu.exec(table.viewport().mapToGlobal(pos))
+        if selected is qrcode_action:
+            self._show_qrcode_dialog(table, row)
+
+    def _show_activities_context_menu(self, table: QTableWidget, pos) -> None:
+        row = table.rowAt(pos.y())
+        if row < 0:
+            return
+
+        course_item = table.item(row, 0)
+        if course_item is None:
+            return
+
+        menu = QMenu(table)
+        qrcode_action = menu.addAction("查看二维码")
+
+        selected = menu.exec(table.viewport().mapToGlobal(pos))
+        if selected is qrcode_action:
+            self._show_qrcode_dialog(table, row)
 
     def _on_monitor_item_double_clicked(self, item: QTableWidgetItem) -> None:
         table = item.tableWidget()
@@ -889,7 +983,7 @@ class MainWindow(QMainWindow):
                 if isinstance(nested_obj, dict):
                     merged.update(nested_obj)
 
-        # Activities 列表来自 /courses/my，详情默认视为已报名。
+        # 活动 列表来自 /courses/my，详情默认视为已报名。
         if "__enrolled" not in merged:
             merged["__enrolled"] = True
 
@@ -903,9 +997,9 @@ class MainWindow(QMainWindow):
     def _on_course_detail_loaded(self, result: tuple[bool, str, dict[str, Any]]) -> None:
         ok, msg, course_obj = result
         if not ok:
-            self._set_status(f"Course detail fallback: {msg}")
+            self._set_status(f"课程详情回退: {msg}")
         else:
-            self._set_status("Course detail loaded")
+            self._set_status("课程详情加载完成")
 
         if not isinstance(course_obj, dict) or not course_obj:
             QMessageBox.information(self, "课程详情", "未找到课程详情数据")
@@ -955,9 +1049,13 @@ class MainWindow(QMainWindow):
             first = sign_addr[0]
             name = str(first.get("address") or "").strip()
             radius = self._extract_checkin_radius(first, course_obj)
+            raw_lat = first.get("latitude")
+            raw_lon = first.get("longitude")
             try:
-                lat = float(first.get("latitude"))
-                lon = float(first.get("longitude"))
+                if raw_lat is None or raw_lon is None:
+                    return name, None, None, radius
+                lat = float(raw_lat)
+                lon = float(raw_lon)
                 return name, lat, lon, radius
             except (TypeError, ValueError):
                 return name, None, None, radius
@@ -1312,7 +1410,7 @@ class MainWindow(QMainWindow):
                             content = resp.content
                             break
                         if 200 <= resp.status_code < 300 and "image/" not in content_type:
-                            errors.append(f"非图片响应: {content_type or 'unknown'}")
+                            errors.append(f"非图片响应: {content_type or '未知'}")
                         else:
                             errors.append(f"HTTP {resp.status_code}")
                     except Exception as inner_exc:  # noqa: BLE001
@@ -1625,6 +1723,8 @@ class MainWindow(QMainWindow):
     def _format_course_detail_html(self, course_obj: dict[str, Any]) -> str:
         status_raw = course_obj.get("sign_status")
         try:
+            if status_raw is None:
+                raise ValueError("empty status")
             status_text = STATUS_MAP.get(int(status_raw), str(status_raw))
         except (TypeError, ValueError):
             status_text = "未知"
@@ -1752,19 +1852,51 @@ class MainWindow(QMainWindow):
 
         return "".join(blocks)
 
+    def _show_qrcode_dialog(self, table: QTableWidget, row: int) -> None:
+        """显示二维码对话框."""
+        course_id_item = table.item(row, 0)
+        if course_id_item is None:
+            QMessageBox.warning(self, "提示", "无法获取课程 ID")
+            return
+
+        try:
+            course_id = int(course_id_item.text().strip())
+        except ValueError:
+            QMessageBox.warning(self, "提示", "课程 ID 格式错误")
+            return
+
+        # 获取课程标题（通常在第 2 或第 3 列）
+        course_title = ""
+        for col in range(1, min(4, table.columnCount())):
+            title_item = table.item(row, col)
+            if title_item is not None:
+                text = title_item.text().strip()
+                if text and text not in ("", "加载中..."):
+                    course_title = text
+                    break
+
+        # 创建并显示二维码对话框
+        dialog = QRCodeDialog(
+            parent=self,
+            course_id=course_id,
+            course_title=course_title,
+        )
+        dialog.load_qrcode()
+        dialog.exec()
+
     def _run_monitor_course_action(self, action: str, course_id_text: str) -> None:
         token = self.token_input.text().strip()
         if (not self.backend_mode_checkbox.isChecked()) and (not token):
-            QMessageBox.warning(self, "Warning", "Token is empty")
+            QMessageBox.warning(self, "提示", "Token 为空")
             return
 
         if not course_id_text.isdigit():
-            QMessageBox.warning(self, "Warning", f"Invalid course id: {course_id_text}")
+            QMessageBox.warning(self, "提示", f"无效课程 ID: {course_id_text}")
             return
 
         course_id = int(course_id_text)
         insecure = self.tls_insecure_checkbox.isChecked()
-        self._set_status(f"Running {action} for course {course_id}...")
+        self._set_status(f"正在执行 {action}（课程 {course_id}）...")
 
         worker = Worker(self._monitor_course_action_task, token, action, course_id, insecure)
         worker.signals.done.connect(self._on_monitor_course_action_done)
@@ -1790,7 +1922,7 @@ class MainWindow(QMainWindow):
                     timeout=12.0,
                     insecure_tls=insecure,
                 )
-                return ok, f"Signup course {course_id}: {msg}"
+                return ok, f"报名课程 {course_id}: {msg}"
 
             if action == "cancel":
                 ok, msg, _data = backend_signed_post(
@@ -1801,9 +1933,9 @@ class MainWindow(QMainWindow):
                     timeout=12.0,
                     insecure_tls=insecure,
                 )
-                return ok, f"Cancel course {course_id}: {msg}"
+                return ok, f"取消报名课程 {course_id}: {msg}"
 
-            return False, f"Unknown action: {action}"
+            return False, f"未知操作: {action}"
 
         ok, msg, enrolled_ids = list_my_course_ids(
             token=token,
@@ -1812,13 +1944,13 @@ class MainWindow(QMainWindow):
             insecure_tls=insecure,
         )
         if not ok:
-            return False, f"Pre-check failed: {msg}"
+            return False, f"预检查失败: {msg}"
 
         is_enrolled = course_id in enrolled_ids
 
         if action == "signup":
             if is_enrolled:
-                return False, f"Course {course_id} already enrolled"
+                return False, f"课程 {course_id} 已报名"
             ok_apply, apply_msg = apply_course(
                 token=token,
                 course_id=course_id,
@@ -1826,11 +1958,11 @@ class MainWindow(QMainWindow):
                 timeout=12.0,
                 insecure_tls=insecure,
             )
-            return ok_apply, f"Signup course {course_id}: {apply_msg}"
+            return ok_apply, f"报名课程 {course_id}: {apply_msg}"
 
         if action == "cancel":
             if not is_enrolled:
-                return False, f"Course {course_id} is not enrolled"
+                return False, f"课程 {course_id} 未报名"
 
             ok_uid, user_id, uid_msg = get_user_id(
                 token=token,
@@ -1838,7 +1970,7 @@ class MainWindow(QMainWindow):
                 insecure_tls=insecure,
             )
             if not ok_uid:
-                return False, f"Failed to get user_id: {uid_msg}"
+                return False, f"获取 user_id 失败：{uid_msg}"
 
             ok_cancel, cancel_msg = cancel_course(
                 token=token,
@@ -1847,9 +1979,9 @@ class MainWindow(QMainWindow):
                 timeout=12.0,
                 insecure_tls=insecure,
             )
-            return ok_cancel, f"Cancel course {course_id}: {cancel_msg}"
+            return ok_cancel, f"取消报名课程 {course_id}: {cancel_msg}"
 
-        return False, f"Unknown action: {action}"
+        return False, f"未知操作: {action}"
 
     def _on_monitor_course_action_done(self, result: tuple[bool, str]) -> None:
         ok, msg = result
@@ -1884,6 +2016,7 @@ class MainWindow(QMainWindow):
             whitelist_category_ids=self.whitelist_category_ids_input.text().strip(),
             whitelist_grade=self.whitelist_grade_input.text().strip(),
             whitelist_academy=self.whitelist_academy_input.text().strip(),
+            activities_has_checkin_only=self._activities_checkin_only(),
         )
 
     def _append_log(self, text: str) -> None:
@@ -1898,15 +2031,15 @@ class MainWindow(QMainWindow):
         self.config.token = normalize_bearer_token(self.config.token)
         self.token_input.setText(self.config.token)
         save_config(self.config)
-        self._set_status("Credentials saved")
+        self._set_status("凭据已保存")
 
     def on_verify_token(self) -> None:
         token = self.token_input.text().strip()
         if not token:
-            QMessageBox.warning(self, "Warning", "Token is empty")
+            QMessageBox.warning(self, "提示", "Token 为空")
             return
 
-        self._set_status("Verifying token...")
+        self._set_status("正在验证 Token...")
         if self.backend_mode_checkbox.isChecked():
             worker = Worker(
                 self._verify_token_backend_task,
@@ -1941,17 +2074,17 @@ class MainWindow(QMainWindow):
         user_id = ""
         if isinstance(data, dict):
             user_id = str(data.get("user_id") or "")
-        return VerifyResult(ok=True, message="Token is valid", user_id=user_id)
+        return VerifyResult(ok=True, message="Token 有效", user_id=user_id)
 
     def _on_verify_done(self, result) -> None:
         if result.ok:
-            self._set_status(f"Token valid. user_id={result.user_id or 'unknown'}")
+            self._set_status(f"Token 有效，user_id={result.user_id or '未知'}")
         else:
-            self._set_status(f"Token invalid: {result.message}")
+            self._set_status(f"Token 无效：{result.message}")
 
     def on_pull_gist(self) -> None:
         cfg = self._cfg_from_inputs()
-        self._set_status("Loading token from Gist...")
+        self._set_status("正在从 Gist 加载 Token...")
         worker = Worker(
             fetch_token_from_gist,
             cfg.github_token,
@@ -1969,15 +2102,15 @@ class MainWindow(QMainWindow):
             self.token_input.setText(token)
             self._set_status(msg)
         else:
-            self._set_status(f"Failed to load token from Gist: {msg}")
+            self._set_status(f"从 Gist 加载 Token 失败：{msg}")
 
     def on_backend_ping(self) -> None:
         base_url = self.backend_base_url_input.text().strip()
         if not base_url:
-            QMessageBox.warning(self, "Warning", "Backend URL is empty")
+            QMessageBox.warning(self, "提示", "后端地址为空")
             return
 
-        self._set_status("Checking backend health...")
+        self._set_status("正在检查后端健康状态...")
         worker = Worker(
             backend_health_check,
             base_url,
@@ -1990,9 +2123,9 @@ class MainWindow(QMainWindow):
     def _on_backend_ping_done(self, result: tuple[bool, str]) -> None:
         ok, msg = result
         if ok:
-            self._set_status(f"Backend reachable: {msg}")
+            self._set_status(f"后端可达：{msg}")
         else:
-            self._set_status(f"Backend unreachable: {msg}")
+            self._set_status(f"后端不可达：{msg}")
 
     def on_backend_sync_token(self) -> None:
         base_url = self.backend_base_url_input.text().strip()
@@ -2000,10 +2133,10 @@ class MainWindow(QMainWindow):
         token = self.token_input.text().strip()
 
         if not token:
-            QMessageBox.warning(self, "Warning", "Token is empty")
+            QMessageBox.warning(self, "提示", "Token 为空")
             return
 
-        self._set_status("Syncing token to backend...")
+        self._set_status("正在同步 Token 到后端...")
         worker = Worker(
             backend_signed_post,
             base_url,
@@ -2019,9 +2152,9 @@ class MainWindow(QMainWindow):
     def _on_backend_sync_token_done(self, result: tuple[bool, str, dict[str, Any]]) -> None:
         ok, msg, _data = result
         if ok:
-            self._set_status("Token synced to backend")
+            self._set_status("Token 已同步到后端")
             return
-        self._set_status(f"Token sync failed: {msg}")
+        self._set_status(f"Token 同步失败：{msg}")
 
     def _csv_to_list(self, raw: str) -> list[str]:
         out: list[str] = []
@@ -2055,7 +2188,7 @@ class MainWindow(QMainWindow):
             "tls_insecure": self.tls_insecure_checkbox.isChecked(),
         }
 
-        self._set_status("Syncing whitelist config to backend...")
+        self._set_status("正在同步白名单配置到后端...")
         worker = Worker(
             backend_signed_put,
             base_url,
@@ -2071,14 +2204,14 @@ class MainWindow(QMainWindow):
     def _on_backend_push_config_done(self, result: tuple[bool, str, dict[str, Any]]) -> None:
         ok, msg, _data = result
         if ok:
-            self._set_status("Backend whitelist config synced")
+            self._set_status("后端白名单配置已同步")
             return
-        self._set_status(f"Sync backend config failed: {msg}")
+        self._set_status(f"同步后端配置失败：{msg}")
 
     def on_backend_pull_config(self) -> None:
         base_url = self.backend_base_url_input.text().strip()
         api_key = self.backend_api_key_input.text().strip()
-        self._set_status("Loading whitelist config from backend...")
+        self._set_status("正在从后端加载白名单配置...")
         worker = Worker(
             backend_signed_get,
             base_url,
@@ -2093,12 +2226,12 @@ class MainWindow(QMainWindow):
     def _on_backend_pull_config_done(self, result: tuple[bool, str, dict[str, Any]]) -> None:
         ok, msg, data = result
         if not ok:
-            self._set_status(f"Load backend config failed: {msg}")
+            self._set_status(f"加载后端配置失败：{msg}")
             return
 
         cfg_data = data.get("data") if isinstance(data, dict) else None
         if not isinstance(cfg_data, dict):
-            self._set_status("Backend config payload is invalid")
+            self._set_status("后端配置载荷无效")
             return
 
         categories = cfg_data.get("whitelist_category_ids")
@@ -2112,7 +2245,7 @@ class MainWindow(QMainWindow):
         if isinstance(academy, list):
             self.whitelist_academy_input.setText(",".join(str(x).strip() for x in academy if str(x).strip()))
 
-        self._set_status("Backend whitelist config loaded")
+        self._set_status("后端白名单配置已加载")
 
     def on_monitor_once(self, silent_if_no_token: bool = False) -> None:
         sign_status = int(self.monitor_status_combo.currentData())
@@ -2125,10 +2258,10 @@ class MainWindow(QMainWindow):
             api_key = self.backend_api_key_input.text().strip()
             if not base_url or not api_key:
                 if not silent_if_no_token:
-                    QMessageBox.warning(self, "Warning", "Backend URL/API key is empty")
+                    QMessageBox.warning(self, "提示", "后端地址或 API Key 为空")
                 return
 
-            self._set_status("Running monitor query from backend...")
+            self._set_status("正在从后端执行监控查询...")
             worker = Worker(self._run_monitor_batch_backend, base_url, api_key, sign_status, limit, insecure)
             worker.signals.done.connect(self._on_monitor_done)
             self.pool.start(worker)
@@ -2137,10 +2270,10 @@ class MainWindow(QMainWindow):
         token = self.token_input.text().strip()
         if not token:
             if not silent_if_no_token:
-                QMessageBox.warning(self, "Warning", "Token is empty")
+                QMessageBox.warning(self, "提示", "Token 为空")
             return
 
-        self._set_status("Running monitor query for all categories...")
+        self._set_status("正在查询全部栏目监控数据...")
         worker = Worker(self._run_monitor_batch, token, sign_status, limit, insecure)
         worker.signals.done.connect(self._on_monitor_done)
         self.pool.start(worker)
@@ -2190,12 +2323,12 @@ class MainWindow(QMainWindow):
                 "items": items,
             }
 
-        # Keep all tabs stable even if category whitelist excludes some categories.
+        # 即使白名单不包含部分栏目，也保持所有标签页稳定显示。
         for cid, _name in CATEGORIES:
             if cid not in result:
                 result[cid] = {
                     "ok": True,
-                    "message": "skipped_by_whitelist",
+                    "message": "白名单已跳过",
                     "items": [],
                 }
         return result
@@ -2230,7 +2363,7 @@ class MainWindow(QMainWindow):
 
         for tab_idx, (category_id, category_name) in enumerate(CATEGORIES):
             table = self.monitor_tables[category_id]
-            cat_result = result.get(category_id, {"ok": False, "message": "No result", "items": []})
+            cat_result = result.get(category_id, {"ok": False, "message": "无结果", "items": []})
             ok = bool(cat_result.get("ok", False))
             items = cat_result.get("items")
             if not isinstance(items, list):
@@ -2297,8 +2430,153 @@ class MainWindow(QMainWindow):
             total_count += len(items)
 
         if failed_count > 0:
-            self._set_status(
-                f"Monitor loaded {total_count} course(s); {failed_count}/6 categories failed"
-            )
+            self._set_status(f"监控已加载 {total_count} 门课程；{failed_count}/6 个栏目查询失败")
         else:
-            self._set_status(f"Monitor loaded {total_count} course(s) across 6 categories")
+            self._set_status(f"监控已加载 {total_count} 门课程（共 6 个栏目）")
+
+
+class QRCodeDialog(QDialog):
+    """二维码展示对话框."""
+
+    def __init__(self, parent: QMainWindow | None = None, course_id: int = 0, course_title: str = ""):
+        super().__init__(parent)
+        self.setWindowTitle("活动二维码")
+        self.resize(600, 650)
+        self.course_id = course_id
+        self.course_title = course_title
+
+        layout = QVBoxLayout(self)
+
+        # 标题
+        title_label = QLabel(f"活动二维码: {course_title}")
+        title_font = title_label.font()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
+
+        # 课程 ID 信息
+        info_label = QLabel(f"课程 ID: {course_id}")
+        layout.addWidget(info_label)
+
+        # 二维码显示区
+        self.qr_label = QLabel()
+        self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.qr_label.setMinimumSize(400, 400)
+        self.qr_label.setMaximumSize(500, 500)
+        self.qr_label.setFixedSize(450, 450)  # 固定大小
+        self.qr_label.setStyleSheet(
+            "border: 1px solid #ccc; background-color: #f5f5f5; padding: 5px;"
+        )
+        self.qr_label.setText("初始化中...")
+        
+        # 创建容器来居中二维码
+        qr_container = QWidget()
+        qr_layout = QHBoxLayout(qr_container)
+        qr_layout.addStretch(1)
+        qr_layout.addWidget(self.qr_label)
+        qr_layout.addStretch(1)
+        
+        layout.addWidget(qr_container, 1)
+
+        # 二维码 URL
+        self.url_browser = QTextBrowser()
+        self.url_browser.setMaximumHeight(60)
+        layout.addWidget(QLabel("二维码链接:"))
+        layout.addWidget(self.url_browser)
+
+        # 按钮
+        btn_layout = QHBoxLayout()
+
+        refresh_btn = QPushButton("刷新二维码")
+        refresh_btn.clicked.connect(self.load_qrcode)
+        btn_layout.addWidget(refresh_btn)
+
+        copy_url_btn = QPushButton("复制链接")
+        copy_url_btn.clicked.connect(self._copy_url_to_clipboard)
+        btn_layout.addWidget(copy_url_btn)
+
+        open_url_btn = QPushButton("浏览器打开")
+        open_url_btn.clicked.connect(self._open_url_in_browser)
+        btn_layout.addWidget(open_url_btn)
+
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(close_btn)
+
+        btn_layout.addStretch(1)
+        layout.addLayout(btn_layout)
+
+    def load_qrcode(self) -> None:
+        """加载并显示二维码."""
+        if not self.course_id:
+            QMessageBox.warning(self, "提示", "课程 ID 为空")
+            return
+
+        self.qr_label.setText("生成二维码中...")
+
+        # 显示二维码 URL
+        qr_url = get_qrcode_url(self.course_id)
+        self.url_browser.setText(qr_url)
+
+        # 生成二维码图像
+        ok, msg, qr_data = get_qrcode_image(
+            course_id=self.course_id,
+        )
+
+        print(f"[QRCode] 生成结果: ok={ok}, msg={msg}, 数据大小={len(qr_data)}")
+
+        if not ok:
+            error_msg = f"生成失败: {msg}"
+            self.qr_label.setText(error_msg)
+            print(f"[QRCode] {error_msg}")
+            return
+
+        if not qr_data:
+            self.qr_label.setText("二维码数据为空")
+            print("[QRCode] 二维码数据为空")
+            return
+
+        try:
+            pixmap = QPixmap()
+            loaded = pixmap.loadFromData(qr_data)
+            print(f"[QRCode] QPixmap 加载结果: {loaded}, 原始大小: {pixmap.width()}x{pixmap.height()}")
+            
+            if not loaded or pixmap.isNull():
+                self.qr_label.setText("无法加载二维码图像")
+                print("[QRCode] 无法加载二维码图像")
+                return
+
+            # 缩放到标签大小（450x450）
+            label_size = 450
+            if pixmap.width() != label_size or pixmap.height() != label_size:
+                pixmap = pixmap.scaledToWidth(label_size - 10, Qt.TransformationMode.SmoothTransformation)
+                print(f"[QRCode] 缩放后: {pixmap.width()}x{pixmap.height()}")
+
+            self.qr_label.setPixmap(pixmap)
+            self.qr_label.setText("")  # 清除文字，只显示图像
+            print("[QRCode] 二维码已显示")
+        except Exception as e:
+            error_msg = f"显示二维码失败: {str(e)}"
+            self.qr_label.setText(error_msg)
+            print(f"[QRCode] {error_msg}")
+            import traceback
+            traceback.print_exc()
+
+    def _copy_url_to_clipboard(self) -> None:
+        """复制二维码 URL 到剪贴板."""
+        import subprocess
+
+        qr_url = get_qrcode_url(self.course_id)
+        try:
+            # 使用 pbcopy（macOS）
+            process = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
+            process.communicate(qr_url.encode("utf-8"))
+            QMessageBox.information(self, "提示", "已复制到剪贴板")
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"复制失败: {str(e)}")
+
+    def _open_url_in_browser(self) -> None:
+        """在浏览器中打开二维码."""
+        qr_url = get_qrcode_url(self.course_id)
+        QDesktopServices.openUrl(QUrl(qr_url))

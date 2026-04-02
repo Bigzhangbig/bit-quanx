@@ -1,28 +1,28 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from .routes import auth, config, courses
 from .security import verify_signed_request
 
-app = FastAPI(title="DEKT Backend", version="0.1.0")
+app = FastAPI(title="DEKT 后端服务", version="0.1.0")
 
 
 @app.middleware("http")
 async def api_key_auth_middleware(request: Request, call_next):
     try:
         await verify_signed_request(request)
-    except Exception as exc:  # noqa: BLE001
-        if hasattr(exc, "status_code") and hasattr(exc, "detail"):
-            return JSONResponse(status_code=exc.status_code, content={"ok": False, "error": exc.detail})
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"ok": False, "error": str(exc.detail)})
+    except Exception:  # noqa: BLE001
         return JSONResponse(status_code=500, content={"ok": False, "error": "internal_auth_error"})
     return await call_next(request)
 
 
 @app.get("/health")
 def health() -> dict[str, object]:
-    return {"ok": True, "message": "alive"}
+    return {"ok": True, "message": "服务正常"}
 
 
 app.include_router(auth.router)

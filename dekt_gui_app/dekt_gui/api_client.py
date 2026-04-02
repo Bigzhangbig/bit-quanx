@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import hmac
+import importlib
+import io
 import json
 import time
 from typing import Any
@@ -792,3 +794,41 @@ def submit_sign_action(
     if data.get("code") == 200 or "成功" in msg:
         return True, msg or "打卡成功"
     return False, msg or "打卡失败"
+
+
+def get_qrcode_url(course_id: int) -> str:
+    return f"{DEKT_HOST}/qrcode/event/?course_id={int(course_id)}"
+
+
+def get_qrcode_image(course_id: int) -> tuple[bool, str, bytes]:
+    """Get QR image bytes.
+
+    The QR code is generated locally from the QR event URL.
+    """
+    qr_url = get_qrcode_url(course_id)
+
+    try:
+        qrcode_module = importlib.import_module("qrcode")
+    except Exception:
+        qrcode_module = None
+
+    if qrcode_module is not None:
+        try:
+            qr = qrcode_module.QRCode(
+                version=1,
+                error_correction=qrcode_module.constants.ERROR_CORRECT_L,
+                box_size=10,
+                border=4,
+            )
+            qr.add_data(qr_url)
+            qr.make(fit=True)
+            image_obj: Any = qr.make_image(fill_color="black", back_color="white")
+            buffer = io.BytesIO()
+            image_obj.save(buffer)
+            data = buffer.getvalue()
+            if data:
+                return True, "OK", data
+        except Exception:
+            pass
+
+    return False, "QR generation unavailable (local dependency missing)", b""

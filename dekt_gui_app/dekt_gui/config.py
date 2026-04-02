@@ -24,6 +24,7 @@ class AppConfig:
     whitelist_category_ids: str = ""
     whitelist_grade: str = ""
     whitelist_academy: str = ""
+    activities_has_checkin_only: bool = False
 
 
 def _parse_dotenv_file(path: Path) -> dict[str, str]:
@@ -99,6 +100,7 @@ def load_config() -> AppConfig:
         whitelist_category_ids=str(env.get("bit_sc_whitelist_category_ids", "")),
         whitelist_grade=str(env.get("bit_sc_whitelist_grade", "")),
         whitelist_academy=str(env.get("bit_sc_whitelist_academy", "")),
+        activities_has_checkin_only=_bool_from_str(env.get("bit_sc_activities_has_checkin_only", "false")),
     )
 
     if not CONFIG_FILE.exists():
@@ -123,6 +125,9 @@ def load_config() -> AppConfig:
     cfg.whitelist_category_ids = str(data.get("whitelist_category_ids", cfg.whitelist_category_ids))
     cfg.whitelist_grade = str(data.get("whitelist_grade", cfg.whitelist_grade))
     cfg.whitelist_academy = str(data.get("whitelist_academy", cfg.whitelist_academy))
+    cfg.activities_has_checkin_only = bool(
+        data.get("activities_has_checkin_only", cfg.activities_has_checkin_only)
+    )
     return cfg
 
 
