@@ -1,12 +1,26 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from .routes import auth, config, courses
+from .runtime import runtime
+from .routes import auth, config, courses, runtime as runtime_routes
 from .security import verify_signed_request
 
-app = FastAPI(title="DEKT 后端服务", version="0.1.0")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    runtime.start()
+    try:
+        yield
+    finally:
+        runtime.stop()
+
+
+app = FastAPI(title="DEKT 后端服务", version="0.1.0", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -28,3 +42,4 @@ def health() -> dict[str, object]:
 app.include_router(auth.router)
 app.include_router(config.router)
 app.include_router(courses.router)
+app.include_router(runtime_routes.router)

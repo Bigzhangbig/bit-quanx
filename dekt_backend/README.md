@@ -20,6 +20,10 @@
 export DEKT_BACKEND_API_KEY="replace-with-strong-secret"
 export DEKT_BACKEND_HOST="0.0.0.0"
 export DEKT_BACKEND_PORT="8000"
+export DEKT_BACKEND_RUNTIME_ENABLED="false"
+export DEKT_BACKEND_RUNTIME_INTERVAL_SECONDS="300"
+export DEKT_BACKEND_RUNTIME_INITIAL_DELAY_SECONDS="0"
+export DEKT_BACKEND_RUNTIME_FETCH_DELAY_MAX_SECONDS="3"
 ```
 
 ## 启动
@@ -53,6 +57,28 @@ python local_smoke.py --base-url http://127.0.0.1:8000 --api-key "replace-with-s
 - `GET /health`（无需签名）
 - `GET /api/v1/config`（需要签名）
 - `POST /api/v1/auth/verify`（需要签名）
+
+## 课程相关接口
+
+- `GET /api/v1/courses/list?sign_status=1|2|3`：按状态获取课程列表
+- `GET /api/v1/courses/started`：获取已开始课程，等价于 `sign_status=2`
+- `GET /api/v1/courses/unstarted`：获取未开始课程，等价于 `sign_status=1`
+- `GET /api/v1/courses/my`：获取我的课程
+- `GET /api/v1/courses/{course_id}/qrcode`：返回活动二维码链接
+- `POST /api/v1/courses/{course_id}/apply`：报名
+- `POST /api/v1/courses/{course_id}/cancel`：取消报名
+- `GET /api/v1/courses/{course_id}/checkin-info`：获取签到信息
+- `POST /api/v1/courses/{course_id}/sign-in`：签到
+- `POST /api/v1/courses/{course_id}/sign-out`：签退
+
+## 后台定时运行
+
+当 `DEKT_BACKEND_RUNTIME_ENABLED=true` 时，服务启动后会进入后台轮询，周期性拉取已开始课程、未开始课程和我的课程，并在每轮中加入随机抖动，避免请求过于集中。
+
+可用接口查看或手动触发：
+
+- `GET /api/v1/runtime/status`
+- `POST /api/v1/runtime/run-now`
 
 可选 token 验证：
 

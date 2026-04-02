@@ -18,6 +18,7 @@ from dekt_gui_app.dekt_gui.api_client import (
 
 from ..filtering import matches_whitelist
 from ..models import SignActionRequest
+from ..qrcode_utils import build_course_qrcode_url
 from ..storage import load_backend_config
 
 router = APIRouter(prefix="/api/v1/courses", tags=["courses"])
@@ -47,11 +48,10 @@ def _get_runtime_token() -> tuple[str, bool]:
     return cfg.token, cfg.tls_insecure
 
 
-@router.get("/list")
-def list_courses_endpoint(
-    sign_status: int = Query(default=1, ge=1, le=3),
-    limit: int = Query(default=20, ge=1, le=100),
-    category_ids: str | None = Query(default=None),
+def _list_courses_by_status(
+    sign_status: int,
+    limit: int,
+    category_ids: str | None,
 ) -> dict[str, Any]:
     cfg = load_backend_config()
     if not cfg.token:
@@ -97,8 +97,34 @@ def list_courses_endpoint(
             "count": len(aggregated),
             "requested_categories": requested_ids,
             "errors": errors,
+            "sign_status": sign_status,
         },
     }
+
+
+@router.get("/list")
+def list_courses_endpoint(
+    sign_status: int = Query(default=1, ge=1, le=3),
+    limit: int = Query(default=20, ge=1, le=100),
+    category_ids: str | None = Query(default=None),
+) -> dict[str, Any]:
+    return _list_courses_by_status(sign_status=sign_status, limit=limit, category_ids=category_ids)
+
+
+@router.get("/started")
+def list_started_courses_endpoint(
+    limit: int = Query(default=20, ge=1, le=100),
+    category_ids: str | None = Query(default=None),
+) -> dict[str, Any]:
+    return _list_courses_by_status(sign_status=2, limit=limit, category_ids=category_ids)
+
+
+@router.get("/unstarted")
+def list_unstarted_courses_endpoint(
+    limit: int = Query(default=20, ge=1, le=100),
+    category_ids: str | None = Query(default=None),
+) -> dict[str, Any]:
+    return _list_courses_by_status(sign_status=1, limit=limit, category_ids=category_ids)
 
 
 @router.get("/my")
@@ -232,3 +258,15 @@ def sign_in_endpoint(course_id: int, payload: SignActionRequest) -> dict[str, An
 def sign_out_endpoint(course_id: int, payload: SignActionRequest) -> dict[str, Any]:
     # The DEKT endpoint identifies sign-out by path and payload content.
     return sign_in_endpoint(course_id, payload)
+
+
+@router.get("/{course_id}/qrcode")
+def get_course_qrcode_endpoint(course_id: int) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "message": "ok",
+        "data": {
+            "course_id": course_id,
+            "qrcode_url": build_course_qrcode_url(course_id),
+        },
+    }

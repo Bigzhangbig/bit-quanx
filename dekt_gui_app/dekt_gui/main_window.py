@@ -10,7 +10,7 @@ from typing import Any
 import certifi
 import httpx
 from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPen, QPixmap
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal
+from PySide6.QtCore import QThreadPool, Qt
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -38,18 +38,13 @@ from PySide6.QtWidgets import (
 
 from .api_client import (
     DEFAULT_TEMPLATE_ID,
-    VerifyResult,
     apply_course,
-    backend_health_check,
     backend_signed_get,
     backend_signed_post,
-    backend_signed_put,
     cancel_course,
     fetch_token_from_gist,
     get_checkin_info,
     get_course_detail,
-    get_qrcode_image,
-    get_qrcode_url,
     get_user_id,
     list_my_courses,
     list_my_course_ids,
@@ -58,43 +53,15 @@ from .api_client import (
     submit_sign_action,
     verify_token,
 )
+from .activities_mixin import ActivitiesMixin
+from .backend_mixin import BackendMixin
 from .config import AppConfig, load_config, save_config
+from .constants import CATEGORIES, STATUS_MAP
+from .qrcode_dialog import QRCodeDialog
+from .worker import Worker
 
 
-CATEGORIES = [
-    (1, "理想信念"),
-    (2, "科学素养"),
-    (3, "社会贡献"),
-    (4, "团队协作"),
-    (5, "文化互鉴"),
-    (6, "健康生活"),
-]
-
-STATUS_MAP = {
-    1: "未开始",
-    2: "进行中",
-    3: "已结束",
-}
-
-
-class WorkerSignals(QObject):
-    done = Signal(object)
-
-
-class Worker(QRunnable):
-    def __init__(self, fn, *args, **kwargs):
-        super().__init__()
-        self.fn = fn
-        self.args = args
-        self.kwargs = kwargs
-        self.signals = WorkerSignals()
-
-    def run(self):
-        result = self.fn(*self.args, **self.kwargs)
-        self.signals.done.emit(result)
-
-
-class MainWindow(QMainWindow):
+class MainWindow(ActivitiesMixin, BackendMixin, QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("DEKT 桌面版（测试版）")
@@ -404,30 +371,6 @@ class MainWindow(QMainWindow):
         worker.signals.done.connect(self._on_sign_refresh_done)
         self.pool.start(worker)
 
-    def on_activities_refresh(self, silent_if_no_token: bool = False) -> None:
-        insecure = self.tls_insecure_checkbox.isChecked()
-        if self.backend_mode_checkbox.isChecked():
-            base_url = self.backend_base_url_input.text().strip()
-            api_key = self.backend_api_key_input.text().strip()
-            if not base_url or not api_key:
-                if not silent_if_no_token:
-                    QMessageBox.warning(self, "提示", "后端地址或 API Key 为空")
-                return
-
-            self._set_status("正在从后端加载我的活动...")
-            worker = Worker(self._fetch_my_courses_backend, base_url, api_key, insecure)
-        else:
-            token = self.token_input.text().strip()
-            if not token:
-                if not silent_if_no_token:
-                    QMessageBox.warning(self, "提示", "Token 为空")
-                return
-
-            self._set_status("正在加载我的活动...")
-            worker = Worker(self._fetch_my_courses, token, insecure)
-        worker.signals.done.connect(self._on_activities_refresh_done)
-        self.pool.start(worker)
-
     def _fetch_my_courses(self, token: str, insecure: bool) -> tuple[bool, str, list[dict[str, Any]]]:
         return list_my_courses(
             token=token,
@@ -524,97 +467,6 @@ class MainWindow(QMainWindow):
             self.sign_table.setColumnWidth(2, 420)
 
         self._set_status(f"可签到活动加载完成：{self.sign_table.rowCount()}")
-
-    def _on_activities_refresh_done(self, result: tuple[bool, str, list[dict[str, Any]]]) -> None:
-        ok, msg, items = result
-        if not ok:
-            self._set_status(f"加载活动失败: {msg}")
-            return
-
-        self._activities_items_cache = [i for i in items if isinstance(i, dict)]
-        self._render_activities_table(self._filtered_activities_items())
-        total = len(self._activities_items_cache)
-        shown = self.activities_table.rowCount()
-        if shown == total:
-            self._set_status(f"活动加载完成：{shown}")
-        else:
-            self._set_status(f"活动加载完成：显示 {shown} / 总计 {total}")
-
-    def _has_checkin_window(self, course: dict[str, Any]) -> bool:
-        sign_in = self._window_text(
-            str(course.get("sign_in_start_time") or ""),
-            str(course.get("sign_in_end_time") or ""),
-        )
-        sign_out = self._window_text(
-            str(course.get("sign_out_start_time") or ""),
-            str(course.get("sign_out_end_time") or ""),
-        )
-        return bool(sign_in or sign_out)
-
-    def _activities_checkin_only(self) -> bool:
-        return bool(self.activities_checkin_filter_combo.currentData())
-
-    def _filtered_activities_items(self) -> list[dict[str, Any]]:
-        if not self._activities_checkin_only():
-            return list(self._activities_items_cache)
-        return [course for course in self._activities_items_cache if self._has_checkin_window(course)]
-
-    def _render_activities_table(self, items: list[dict[str, Any]]) -> None:
-
-        self.activities_table.setRowCount(0)
-        for row_idx, course in enumerate(items):
-            if not isinstance(course, dict):
-                continue
-
-            self.activities_table.insertRow(row_idx)
-            course_id = str(course.get("id") or course.get("course_id") or "")
-            category = ""
-            cat_obj = course.get("transcript_index")
-            if isinstance(cat_obj, dict):
-                category = str(cat_obj.get("transcript_name") or "")
-            if not category:
-                category = self._first_non_empty(course, ["transcript_name", "category_name"])
-
-            title = str(course.get("title") or course.get("course_title") or "")
-            duration = self._duration_text(course)
-            sign_in = self._window_text(
-                str(course.get("sign_in_start_time") or ""),
-                str(course.get("sign_in_end_time") or ""),
-            )
-            sign_out = self._window_text(
-                str(course.get("sign_out_start_time") or ""),
-                str(course.get("sign_out_end_time") or ""),
-            )
-
-            self.activities_table.setItem(row_idx, 0, QTableWidgetItem(course_id))
-            self._set_table_cover_cell(self.activities_table, row_idx, 1, course)
-            self.activities_table.setItem(row_idx, 2, QTableWidgetItem(category))
-            self.activities_table.setItem(row_idx, 3, QTableWidgetItem(title))
-            self.activities_table.setItem(row_idx, 4, QTableWidgetItem(duration))
-            self.activities_table.setItem(row_idx, 5, QTableWidgetItem(sign_in))
-            self.activities_table.setItem(row_idx, 6, QTableWidgetItem(sign_out))
-
-            id_item = self.activities_table.item(row_idx, 0)
-            if id_item is not None:
-                course_payload = dict(course)
-                course_payload["__enrolled"] = True
-                id_item.setData(Qt.ItemDataRole.UserRole, course_payload)
-
-        self.activities_table.resizeColumnsToContents()
-        self.activities_table.setColumnWidth(1, 72)
-        if self.activities_table.columnWidth(3) > 420:
-            self.activities_table.setColumnWidth(3, 420)
-
-    def _on_activities_filter_changed(self, _index: int) -> None:
-        if not self._activities_items_cache:
-            return
-        self._render_activities_table(self._filtered_activities_items())
-        total = len(self._activities_items_cache)
-        shown = self.activities_table.rowCount()
-        if shown == total:
-            self._set_status(f"活动筛选已更新：{shown}")
-        else:
-            self._set_status(f"活动筛选已更新：显示 {shown} / 总计 {total}")
 
     def _on_sign_item_double_clicked(self, item: QTableWidgetItem) -> None:
         self._open_detail_from_table_item(item)
@@ -2053,29 +1905,6 @@ class MainWindow(QMainWindow):
         worker.signals.done.connect(self._on_verify_done)
         self.pool.start(worker)
 
-    def _verify_token_backend_task(
-        self,
-        base_url: str,
-        api_key: str,
-        token: str,
-        insecure: bool,
-    ) -> VerifyResult:
-        ok, msg, data = backend_signed_post(
-            base_url=base_url,
-            path="/api/v1/auth/verify",
-            api_key=api_key,
-            body={"token": token, "use_stored": False},
-            timeout=12.0,
-            insecure_tls=insecure,
-        )
-        if not ok:
-            return VerifyResult(ok=False, message=msg)
-
-        user_id = ""
-        if isinstance(data, dict):
-            user_id = str(data.get("user_id") or "")
-        return VerifyResult(ok=True, message="Token 有效", user_id=user_id)
-
     def _on_verify_done(self, result) -> None:
         if result.ok:
             self._set_status(f"Token 有效，user_id={result.user_id or '未知'}")
@@ -2104,68 +1933,6 @@ class MainWindow(QMainWindow):
         else:
             self._set_status(f"从 Gist 加载 Token 失败：{msg}")
 
-    def on_backend_ping(self) -> None:
-        base_url = self.backend_base_url_input.text().strip()
-        if not base_url:
-            QMessageBox.warning(self, "提示", "后端地址为空")
-            return
-
-        self._set_status("正在检查后端健康状态...")
-        worker = Worker(
-            backend_health_check,
-            base_url,
-            8.0,
-            self.tls_insecure_checkbox.isChecked(),
-        )
-        worker.signals.done.connect(self._on_backend_ping_done)
-        self.pool.start(worker)
-
-    def _on_backend_ping_done(self, result: tuple[bool, str]) -> None:
-        ok, msg = result
-        if ok:
-            self._set_status(f"后端可达：{msg}")
-        else:
-            self._set_status(f"后端不可达：{msg}")
-
-    def on_backend_sync_token(self) -> None:
-        base_url = self.backend_base_url_input.text().strip()
-        api_key = self.backend_api_key_input.text().strip()
-        token = self.token_input.text().strip()
-
-        if not token:
-            QMessageBox.warning(self, "提示", "Token 为空")
-            return
-
-        self._set_status("正在同步 Token 到后端...")
-        worker = Worker(
-            backend_signed_post,
-            base_url,
-            "/api/v1/auth/set-token",
-            api_key,
-            {"token": token},
-            10.0,
-            self.tls_insecure_checkbox.isChecked(),
-        )
-        worker.signals.done.connect(self._on_backend_sync_token_done)
-        self.pool.start(worker)
-
-    def _on_backend_sync_token_done(self, result: tuple[bool, str, dict[str, Any]]) -> None:
-        ok, msg, _data = result
-        if ok:
-            self._set_status("Token 已同步到后端")
-            return
-        self._set_status(f"Token 同步失败：{msg}")
-
-    def _csv_to_list(self, raw: str) -> list[str]:
-        out: list[str] = []
-        for item in (raw or "").split(","):
-            text = item.strip()
-            if not text:
-                continue
-            if text not in out:
-                out.append(text)
-        return out
-
     def _csv_to_int_list(self, raw: str) -> list[int]:
         out: list[int] = []
         for text in self._csv_to_list(raw):
@@ -2176,76 +1943,6 @@ class MainWindow(QMainWindow):
             if 1 <= value <= 6 and value not in out:
                 out.append(value)
         return out
-
-    def on_backend_push_config(self) -> None:
-        base_url = self.backend_base_url_input.text().strip()
-        api_key = self.backend_api_key_input.text().strip()
-
-        payload = {
-            "whitelist_category_ids": self._csv_to_int_list(self.whitelist_category_ids_input.text()),
-            "whitelist_grade": self._csv_to_list(self.whitelist_grade_input.text()),
-            "whitelist_academy": self._csv_to_list(self.whitelist_academy_input.text()),
-            "tls_insecure": self.tls_insecure_checkbox.isChecked(),
-        }
-
-        self._set_status("正在同步白名单配置到后端...")
-        worker = Worker(
-            backend_signed_put,
-            base_url,
-            "/api/v1/config",
-            api_key,
-            payload,
-            10.0,
-            self.tls_insecure_checkbox.isChecked(),
-        )
-        worker.signals.done.connect(self._on_backend_push_config_done)
-        self.pool.start(worker)
-
-    def _on_backend_push_config_done(self, result: tuple[bool, str, dict[str, Any]]) -> None:
-        ok, msg, _data = result
-        if ok:
-            self._set_status("后端白名单配置已同步")
-            return
-        self._set_status(f"同步后端配置失败：{msg}")
-
-    def on_backend_pull_config(self) -> None:
-        base_url = self.backend_base_url_input.text().strip()
-        api_key = self.backend_api_key_input.text().strip()
-        self._set_status("正在从后端加载白名单配置...")
-        worker = Worker(
-            backend_signed_get,
-            base_url,
-            "/api/v1/config",
-            api_key,
-            10.0,
-            self.tls_insecure_checkbox.isChecked(),
-        )
-        worker.signals.done.connect(self._on_backend_pull_config_done)
-        self.pool.start(worker)
-
-    def _on_backend_pull_config_done(self, result: tuple[bool, str, dict[str, Any]]) -> None:
-        ok, msg, data = result
-        if not ok:
-            self._set_status(f"加载后端配置失败：{msg}")
-            return
-
-        cfg_data = data.get("data") if isinstance(data, dict) else None
-        if not isinstance(cfg_data, dict):
-            self._set_status("后端配置载荷无效")
-            return
-
-        categories = cfg_data.get("whitelist_category_ids")
-        grades = cfg_data.get("whitelist_grade")
-        academy = cfg_data.get("whitelist_academy")
-
-        if isinstance(categories, list):
-            self.whitelist_category_ids_input.setText(",".join(str(int(x)) for x in categories if str(x).strip()))
-        if isinstance(grades, list):
-            self.whitelist_grade_input.setText(",".join(str(x).strip() for x in grades if str(x).strip()))
-        if isinstance(academy, list):
-            self.whitelist_academy_input.setText(",".join(str(x).strip() for x in academy if str(x).strip()))
-
-        self._set_status("后端白名单配置已加载")
 
     def on_monitor_once(self, silent_if_no_token: bool = False) -> None:
         sign_status = int(self.monitor_status_combo.currentData())
@@ -2434,149 +2131,3 @@ class MainWindow(QMainWindow):
         else:
             self._set_status(f"监控已加载 {total_count} 门课程（共 6 个栏目）")
 
-
-class QRCodeDialog(QDialog):
-    """二维码展示对话框."""
-
-    def __init__(self, parent: QMainWindow | None = None, course_id: int = 0, course_title: str = ""):
-        super().__init__(parent)
-        self.setWindowTitle("活动二维码")
-        self.resize(600, 650)
-        self.course_id = course_id
-        self.course_title = course_title
-
-        layout = QVBoxLayout(self)
-
-        # 标题
-        title_label = QLabel(f"活动二维码: {course_title}")
-        title_font = title_label.font()
-        title_font.setPointSize(14)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        layout.addWidget(title_label)
-
-        # 课程 ID 信息
-        info_label = QLabel(f"课程 ID: {course_id}")
-        layout.addWidget(info_label)
-
-        # 二维码显示区
-        self.qr_label = QLabel()
-        self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.qr_label.setMinimumSize(400, 400)
-        self.qr_label.setMaximumSize(500, 500)
-        self.qr_label.setFixedSize(450, 450)  # 固定大小
-        self.qr_label.setStyleSheet(
-            "border: 1px solid #ccc; background-color: #f5f5f5; padding: 5px;"
-        )
-        self.qr_label.setText("初始化中...")
-        
-        # 创建容器来居中二维码
-        qr_container = QWidget()
-        qr_layout = QHBoxLayout(qr_container)
-        qr_layout.addStretch(1)
-        qr_layout.addWidget(self.qr_label)
-        qr_layout.addStretch(1)
-        
-        layout.addWidget(qr_container, 1)
-
-        # 二维码 URL
-        self.url_browser = QTextBrowser()
-        self.url_browser.setMaximumHeight(60)
-        layout.addWidget(QLabel("二维码链接:"))
-        layout.addWidget(self.url_browser)
-
-        # 按钮
-        btn_layout = QHBoxLayout()
-
-        refresh_btn = QPushButton("刷新二维码")
-        refresh_btn.clicked.connect(self.load_qrcode)
-        btn_layout.addWidget(refresh_btn)
-
-        copy_url_btn = QPushButton("复制链接")
-        copy_url_btn.clicked.connect(self._copy_url_to_clipboard)
-        btn_layout.addWidget(copy_url_btn)
-
-        open_url_btn = QPushButton("浏览器打开")
-        open_url_btn.clicked.connect(self._open_url_in_browser)
-        btn_layout.addWidget(open_url_btn)
-
-        close_btn = QPushButton("关闭")
-        close_btn.clicked.connect(self.accept)
-        btn_layout.addWidget(close_btn)
-
-        btn_layout.addStretch(1)
-        layout.addLayout(btn_layout)
-
-    def load_qrcode(self) -> None:
-        """加载并显示二维码."""
-        if not self.course_id:
-            QMessageBox.warning(self, "提示", "课程 ID 为空")
-            return
-
-        self.qr_label.setText("生成二维码中...")
-
-        # 显示二维码 URL
-        qr_url = get_qrcode_url(self.course_id)
-        self.url_browser.setText(qr_url)
-
-        # 生成二维码图像
-        ok, msg, qr_data = get_qrcode_image(
-            course_id=self.course_id,
-        )
-
-        print(f"[QRCode] 生成结果: ok={ok}, msg={msg}, 数据大小={len(qr_data)}")
-
-        if not ok:
-            error_msg = f"生成失败: {msg}"
-            self.qr_label.setText(error_msg)
-            print(f"[QRCode] {error_msg}")
-            return
-
-        if not qr_data:
-            self.qr_label.setText("二维码数据为空")
-            print("[QRCode] 二维码数据为空")
-            return
-
-        try:
-            pixmap = QPixmap()
-            loaded = pixmap.loadFromData(qr_data)
-            print(f"[QRCode] QPixmap 加载结果: {loaded}, 原始大小: {pixmap.width()}x{pixmap.height()}")
-            
-            if not loaded or pixmap.isNull():
-                self.qr_label.setText("无法加载二维码图像")
-                print("[QRCode] 无法加载二维码图像")
-                return
-
-            # 缩放到标签大小（450x450）
-            label_size = 450
-            if pixmap.width() != label_size or pixmap.height() != label_size:
-                pixmap = pixmap.scaledToWidth(label_size - 10, Qt.TransformationMode.SmoothTransformation)
-                print(f"[QRCode] 缩放后: {pixmap.width()}x{pixmap.height()}")
-
-            self.qr_label.setPixmap(pixmap)
-            self.qr_label.setText("")  # 清除文字，只显示图像
-            print("[QRCode] 二维码已显示")
-        except Exception as e:
-            error_msg = f"显示二维码失败: {str(e)}"
-            self.qr_label.setText(error_msg)
-            print(f"[QRCode] {error_msg}")
-            import traceback
-            traceback.print_exc()
-
-    def _copy_url_to_clipboard(self) -> None:
-        """复制二维码 URL 到剪贴板."""
-        import subprocess
-
-        qr_url = get_qrcode_url(self.course_id)
-        try:
-            # 使用 pbcopy（macOS）
-            process = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
-            process.communicate(qr_url.encode("utf-8"))
-            QMessageBox.information(self, "提示", "已复制到剪贴板")
-        except Exception as e:
-            QMessageBox.warning(self, "错误", f"复制失败: {str(e)}")
-
-    def _open_url_in_browser(self) -> None:
-        """在浏览器中打开二维码."""
-        qr_url = get_qrcode_url(self.course_id)
-        QDesktopServices.openUrl(QUrl(qr_url))
