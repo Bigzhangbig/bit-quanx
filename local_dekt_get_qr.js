@@ -81,8 +81,8 @@ if (!fs.existsSync(CONFIG.saveDir)) {
                 }
 
                 for (const item of list) {
-                    const courseId = item.courseId || item.course_id;
-                    const title = item.courseName || item.course_title;
+                    const courseId = item.courseId || item.course_id || item.id;
+                    const title = item.courseName || item.course_title || item.title;
                     const statusLabel = item.status_label || item.status;
                     
                     // 获取详细信息
