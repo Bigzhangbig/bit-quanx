@@ -28,7 +28,7 @@ jobs:
 
       - name: Syntax check
         run: |
-          python -m compileall dekt_backend dekt_gui_app
+          python -m compileall dekt_backend dekt_gui_app/dekt_gui dekt_gui_app/main.py
 
       - name: Run backend tests
         run: |
