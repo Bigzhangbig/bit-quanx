@@ -117,6 +117,7 @@ class MainWindow(ActivitiesMixin, BackendMixin, QMainWindow):
         self.monitor_status_combo = QComboBox()
         self.monitor_status_combo.addItem("未开始", 1)
         self.monitor_status_combo.addItem("进行中", 2)
+        self.monitor_status_combo.addItem("已结束", 3)
         self.monitor_status_combo.currentIndexChanged.connect(self._on_monitor_status_changed)
 
         self.monitor_limit_spin = QSpinBox()
@@ -1717,9 +1718,16 @@ class MainWindow(ActivitiesMixin, BackendMixin, QMainWindow):
             QMessageBox.warning(self, "提示", "课程 ID 格式错误")
             return
 
+        course_payload = course_id_item.data(Qt.ItemDataRole.UserRole)
+
         # 获取课程标题（通常在第 2 或第 3 列）
         course_title = ""
+        if isinstance(course_payload, dict):
+            course_title = str(course_payload.get("title") or course_payload.get("course_title") or "").strip()
+
         for col in range(1, min(4, table.columnCount())):
+            if course_title:
+                break
             title_item = table.item(row, col)
             if title_item is not None:
                 text = title_item.text().strip()
@@ -1727,11 +1735,38 @@ class MainWindow(ActivitiesMixin, BackendMixin, QMainWindow):
                     course_title = text
                     break
 
+        sign_in_window = ""
+        sign_out_window = ""
+        if isinstance(course_payload, dict):
+            sign_in_start = str(course_payload.get("sign_in_start_time") or "")
+            sign_in_end = str(course_payload.get("sign_in_end_time") or "")
+            sign_out_start = str(course_payload.get("sign_out_start_time") or "")
+            sign_out_end = str(course_payload.get("sign_out_end_time") or "")
+            sign_in_window = self._window_text(sign_in_start, sign_in_end)
+            sign_out_window = self._window_text(sign_out_start, sign_out_end)
+
+        # 若行数据没有完整时间字段，回退到表格列显示值。
+        if not sign_in_window or not sign_out_window:
+            for col in range(table.columnCount()):
+                header_item = table.horizontalHeaderItem(col)
+                cell_item = table.item(row, col)
+                if header_item is None or cell_item is None:
+                    continue
+
+                header_text = header_item.text().strip()
+                cell_text = cell_item.text().strip()
+                if (not sign_in_window) and header_text in ("签到窗口", "签到"):
+                    sign_in_window = cell_text
+                if (not sign_out_window) and header_text in ("签退窗口", "签退"):
+                    sign_out_window = cell_text
+
         # 创建并显示二维码对话框
         dialog = QRCodeDialog(
             parent=self,
             course_id=course_id,
             course_title=course_title,
+            sign_in_window=sign_in_window,
+            sign_out_window=sign_out_window,
         )
         dialog.load_qrcode()
         dialog.exec()
