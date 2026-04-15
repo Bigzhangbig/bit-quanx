@@ -32,4 +32,4 @@ jobs:
 
       - name: Run backend tests
         run: |
-          pytest -q dekt_backend/tests
+          PYTHONPATH=. pytest -q dekt_backend/tests
