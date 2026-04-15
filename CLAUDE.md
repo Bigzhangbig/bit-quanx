@@ -10,12 +10,14 @@ This is a hybrid JavaScript/Python repository for automating BIT (Beijing Instit
 2. **Local Node.js debug tools** (`local_*.js`) that wrap the QX scripts for local development.
 3. **Python backend + desktop GUI** (`dekt_backend/` and `dekt_gui_app/`) that provide a standalone alternative to the JS toolchain.
 
+All JavaScript files are stored under `scripts/`.
+
 ## Common Commands
 
 ### JavaScript / Node.js
 
 - Install the only runtime dependency: `npm install` (or `bun install`)
-- Run a local debug script: `node local_dekt_monitor.js` or `node local_card_probe.js`
+- Run a local debug script: `node scripts/local_dekt_monitor.js` or `node scripts/local_card_probe.js`
 
 ### Python Backend (`dekt_backend/`)
 
@@ -58,14 +60,14 @@ This is a hybrid JavaScript/Python repository for automating BIT (Beijing Instit
 ### JS Side: QX / Local Dual Environment
 
 - All production scripts use the QX global `Env` class (instantiated as `const $ = new Env(...)`).
-- `local_env.js` provides a Node.js-compatible shim of the `Env` class so the same scripts can run locally without QX.
-- Local wrappers (`local_*.js`) require `./local_env` and then load the original logic.
+- `scripts/local_env.js` provides a Node.js-compatible shim of the `Env` class so the same scripts can run locally without QX.
+- Local wrappers (`scripts/local_*.js`) require `./local_env` and then load the original logic.
 - Scripts read configuration from the repo-root `.env` file when running locally, and from BoxJS when running in QX.
 - Naming convention:
-  - `dekt_*.js` — QX scripts for DEKT (second classroom)
-  - `card_*.js` — QX scripts for campus card
-  - `local_*.js` — local Node.js wrappers / utilities
-  - `*_cookie.js` — rewrite scripts that capture auth tokens from requests
+  - `scripts/dekt_*.js` — QX scripts for DEKT (second classroom)
+  - `scripts/card_*.js` — QX scripts for campus card
+  - `scripts/local_*.js` — local Node.js wrappers / utilities
+  - `scripts/*_cookie.js` — rewrite scripts that capture auth tokens from requests
 
 ### Python Side: Backend + GUI
 

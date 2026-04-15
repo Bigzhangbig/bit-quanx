@@ -2,7 +2,7 @@
   "name": "bit-dekt-quanx",
   "version": "1.0.0",
   "description": "本项目包含一套用于北理工第二课堂（微信小程序）的 Quantumult X 脚本，支持自动获取 Token、监控新活动、自动报名（捡漏）、活动签到提醒以及本地调试工具。",
-  "main": "bit_cookie.js",
+  "main": "scripts/dekt_cookie.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },

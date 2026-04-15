@@ -9,6 +9,8 @@
 
 ## 脚本列表
 
+说明：仓库中的 JS 脚本已统一整理到 `scripts/` 目录。
+
 ### 1. 你懂的
 
 前缀: `dekt_`
@@ -55,19 +57,19 @@
 
 *   **`local_env.js`**: 本地 Env 环境模拟模块，为其他本地脚本提供配置读写和网络请求能力。
 *   **`local_dekt_monitor.js`**: 本地运行 `dekt_monitor.js` 的封装。
-    *   用法: `node local_dekt_monitor.js [--enrollId=123]`
+    *   用法: `node scripts/local_dekt_monitor.js [--enrollId=123]`
 *   **`local_dekt_my_activities.js`**: 本地运行我的活动脚本，验证时长字段获取逻辑。
-    *   用法: `node local_dekt_my_activities.js`
+    *   用法: `node scripts/local_dekt_my_activities.js`
 *   **`local_dekt_unenroll.js`**: 本地取消报名工具。
-    *   用法: `node local_dekt_unenroll.js [--course=451]`
+    *   用法: `node scripts/local_dekt_unenroll.js [--course=451]`
 *   **`local_dekt_signin_loop.js`**: 本地循环检测签到/签退工具，自动处理今天窗口内全部课程。
-    *   用法: `node local_dekt_signin_loop.js [--interval=60] [--max-loops=20]`
+    *   用法: `node scripts/local_dekt_signin_loop.js [--interval=60] [--max-loops=20]`
 *   **`local_sync_gist.js`**: 从 Gist 同步配置到本地 `.env`。
-    *   用法: `node local_sync_gist.js`
+    *   用法: `node scripts/local_sync_gist.js`
 *   **`local_card_probe.js`**: 校园卡凭证探测工具，通过学工号获取 openid/JSESSIONID。
-    *   用法: 配置 `.env` 中的 `bit_card_idserial`，运行 `node local_card_probe.js`
+    *   用法: 配置 `.env` 中的 `bit_card_idserial`，运行 `node scripts/local_card_probe.js`
 *   **`local_card_gist_check.js`**: 校园卡 Gist 校验工具，拉取并展示已存储的凭证。
-    *   用法: `node local_card_gist_check.js`
+    *   用法: `node scripts/local_card_gist_check.js`
 
 ## 使用说明
 

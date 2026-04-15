@@ -2,6 +2,7 @@
 env.json
 .env
 .venv/
+.vscode/
 
 # Dependencies
 node_modules/

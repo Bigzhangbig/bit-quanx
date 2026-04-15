@@ -4,8 +4,8 @@
 
 ## 项目定位
 - 仓库是三层混合架构：
-  - Quantumult X 脚本：`dekt_*.js`、`card_*.js`
-  - 本地 Node 调试封装：`local_*.js`
+  - Quantumult X 脚本：`scripts/dekt_*.js`、`scripts/card_*.js`
+  - 本地 Node 调试封装：`scripts/local_*.js`
   - Python 后端与 GUI：`dekt_backend/`、`dekt_gui_app/`
 - 核心目标：实现 DEKT 全链路操作（抓取鉴权、监控、报名、签到/签退、后端网页服务、桌面 GUI）。
 
@@ -16,13 +16,13 @@
 - 变更策略：最小化改动，不重构无关代码，不破坏现有任务/重写片段格式。
 
 ## 架构边界
-- QX 与本地 Node 共享脚本逻辑：本地通过 `local_env.js` 适配 `Env`，`local_*.js` 仅做包装与调试入口。
+- QX 与本地 Node 共享脚本逻辑：本地通过 `scripts/local_env.js` 适配 `Env`，`scripts/local_*.js` 仅做包装与调试入口。
 - Python 后端 `dekt_backend/` 提供网页页面（`/`、`/health`、`/runtime`）与运行时轮询。
 - Python GUI `dekt_gui_app/` 仅直连 DEKT 接口；后端运行时复用 GUI 客户端层（`dekt_gui_app/dekt_gui/api_client.py`）。
 
 ## 构建与测试
 - JavaScript 依赖安装：优先 `bun install`（兼容 `npm install`）。
-- 本地脚本运行：`node local_dekt_monitor.js`、`node local_card_probe.js` 等。
+- 本地脚本运行：`node scripts/local_dekt_monitor.js`、`node scripts/local_card_probe.js` 等。
 - 后端启动（从仓库根目录）：
   - `cd dekt_backend`
   - `python -m venv .venv`
