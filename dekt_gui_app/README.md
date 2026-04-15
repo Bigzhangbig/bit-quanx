@@ -45,27 +45,6 @@ python -m venv .venv
 .venv/bin/python main.py
 ```
 
-## 后端模式（前后端分离）
-
-当 GUI 仅作为客户端、运行配置保存在后端时，请使用该模式。
-
-1. 先启动后端服务（见 `../dekt_backend/README.md`）。
-2. 打开 GUI 的“凭据”标签页。
-3. 启用“后端模式（签名 API 调用）”。
-4. 填写后端连接信息：
-   - 后端地址（示例：`http://127.0.0.1:8000`）
-   - 后端 API key（需与后端 `DEKT_BACKEND_API_KEY` 一致）
-5. 点击“测试后端连接”，验证 `/health` 与签名配置读取。
-6. 在 GUI 设置或粘贴 Token 后，点击“同步 Token 到后端”。
-7. 填写白名单字段（栏目、年级、学院）后，点击“同步白名单到后端”。
-8. 可选：点击“从后端加载白名单”拉取服务端当前配置。
-
-启用后端模式后：
-
-- “验证 Token”走后端 `/api/v1/auth/verify`
-- “监控”列表与右键“报名/取消报名”走后端课程 API
-- “签到/签退”走后端 `checkin-info` 与打卡 API
-
 若存在 `dekt_gui_app/.env`，应用会自动读取以下默认值：
 
 - `bit_sc_token`
@@ -74,9 +53,6 @@ python -m venv .venv
 - `bit_sc_gist_filename`
 - `bit_sc_tencent_map_key`
 - `bit_sc_tls_insecure`（可选，`true/false`）
-- `dekt_backend_mode`（可选，`true/false`）
-- `dekt_backend_base_url`（可选）
-- `dekt_backend_api_key`（可选）
 
 ## 打包（macOS）
 

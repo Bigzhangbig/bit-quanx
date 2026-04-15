@@ -11,25 +11,14 @@ from .worker import Worker
 class ActivitiesMixin:
     def on_activities_refresh(self: Any, silent_if_no_token: bool = False) -> None:
         insecure = self.tls_insecure_checkbox.isChecked()
-        if self.backend_mode_checkbox.isChecked():
-            base_url = self.backend_base_url_input.text().strip()
-            api_key = self.backend_api_key_input.text().strip()
-            if not base_url or not api_key:
-                if not silent_if_no_token:
-                    QMessageBox.warning(self, "提示", "后端地址或 API Key 为空")
-                return
+        token = self.token_input.text().strip()
+        if not token:
+            if not silent_if_no_token:
+                QMessageBox.warning(self, "提示", "Token 为空")
+            return
 
-            self._set_status("正在从后端加载我的活动...")
-            worker = Worker(self._fetch_my_courses_backend, base_url, api_key, insecure)
-        else:
-            token = self.token_input.text().strip()
-            if not token:
-                if not silent_if_no_token:
-                    QMessageBox.warning(self, "提示", "Token 为空")
-                return
-
-            self._set_status("正在加载我的活动...")
-            worker = Worker(self._fetch_my_courses, token, insecure)
+        self._set_status("正在加载我的活动...")
+        worker = Worker(self._fetch_my_courses, token, insecure)
         worker.signals.done.connect(self._on_activities_refresh_done)
         self.pool.start(worker)
 

@@ -2,6 +2,17 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+_BACKEND_DIR = Path(__file__).resolve().parent
+_REPO_DIR = _BACKEND_DIR.parent
+
+# 优先读取仓库根目录 .env，其次读取 dekt_backend/.env。
+load_dotenv(_REPO_DIR / ".env", override=False)
+load_dotenv(_BACKEND_DIR / ".env", override=False)
 
 
 @dataclass(frozen=True)

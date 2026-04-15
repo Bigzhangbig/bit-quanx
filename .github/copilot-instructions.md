@@ -1,72 +1,54 @@
 # Copilot Workspace Instructions
 
-本文件用于指导 GitHub Copilot / Copilot Chat 在本仓库中的行为与风格，帮助其更贴合本项目需求生成代码与解释。
+本文件定义仓库级默认行为，目标是让代理能在本项目中快速、安全、可验证地完成开发任务。
 
-## 项目概览
-- 项目：北理工第二课堂 & 校园卡 Quantumult X 脚本 + 本地调试工具
-- 语言：JavaScript (Node.js / CommonJS)、少量 Python
-- 运行环境：
-  - Quantumult X 运行脚本（`*.js`）
-  - 本地 Node.js 18+ 运行 `local_*.js`
-- 依赖：`qrcode`
+## 项目定位
+- 仓库是三层混合架构：
+  - Quantumult X 脚本：`dekt_*.js`、`card_*.js`
+  - 本地 Node 调试封装：`local_*.js`
+  - Python 后端与 GUI：`dekt_backend/`、`dekt_gui_app/`
+- 核心目标：实现 DEKT 全链路操作（抓取鉴权、监控、报名、签到/签退、后端网页服务、桌面 GUI）。
 
-## 开发与代码风格
-- 语法：ES2020+，优先使用 `async/await`
-- 模块：`type: commonjs`，使用 `require` / `module.exports`
-- 命名：使用有意义的名字，避免单字符变量
-- 结构：
-  - 尽量保持函数小而单一职责
-  - 把“环境相关逻辑”（Quantumult X vs 本地 Node）做适配封装
-- 注释：用简洁中文注释关键业务/边界条件
-- 日志：
-  - QX 环境使用 `$notify` / `$message`（若适用）
-  - 本地环境使用 `console.log`，避免过量输出
+## 代码风格
+- JavaScript：`CommonJS`（`require` / `module.exports`），ES2020+，优先 `async/await`。
+- Python：保持现有类型标注风格（`from __future__ import annotations`），优先复用现有模块而非新增重复实现。
+- 注释与说明：简洁中文，聚焦边界条件与业务原因。
+- 变更策略：最小化改动，不重构无关代码，不破坏现有任务/重写片段格式。
 
-## 约束与安全
-- 不得泄露 Token、Cookie、OpenID 等敏感信息
-- 读取配置优先：BoxJS > `.env`（本地）
-- 网络请求注意 gzip、超时与重试策略
-- 生成/修改脚本需避免破坏 Quantumult X 计划任务格式
+## 架构边界
+- QX 与本地 Node 共享脚本逻辑：本地通过 `local_env.js` 适配 `Env`，`local_*.js` 仅做包装与调试入口。
+- Python 后端 `dekt_backend/` 提供网页页面（`/`、`/health`、`/runtime`）与运行时轮询。
+- Python GUI `dekt_gui_app/` 仅直连 DEKT 接口；后端运行时复用 GUI 客户端层（`dekt_gui_app/dekt_gui/api_client.py`）。
 
-## 常用约定
-- 第二课堂 API 域名：`qcbldekt.bit.edu.cn`
-- 校园卡域名：`dkykt.info.bit.edu.cn`
-- 功能脚本前缀：
-  - 第二课堂：`dekt_*`
-  - 校园卡：`card_*`
-  - 本地调试：`local_*`
-- 典型文件：
-  - Cookie/Token 捕获：`*_cookie.js`
-  - 定时监控：`*_monitor.js`
-  - 我的活动提醒：`dekt_my_activities.js`
-  - 余额监控：`card_balance.js`
+## 构建与测试
+- JavaScript 依赖安装：优先 `bun install`（兼容 `npm install`）。
+- 本地脚本运行：`node local_dekt_monitor.js`、`node local_card_probe.js` 等。
+- 后端启动（从仓库根目录）：
+  - `cd dekt_backend`
+  - `python -m venv .venv`
+  - `.venv/bin/pip install -r requirements.txt`
+  - `.venv/bin/uvicorn dekt_backend.main:app --host 0.0.0.0 --port 8000`
+- 后端测试：`pytest -q dekt_backend/tests`
+- 语法检查：`python -m compileall dekt_backend dekt_gui_app`
+- GUI 启动：`cd dekt_gui_app && .venv/bin/python main.py`
 
-## 期望的 Copilot 行为
-- 在生成代码前，先给出简短方案（输入/输出、边界、错误处理）
-- 生成 JS 默认 CommonJS，具备 QX 与本地双环境兼容（若相关）
-- 请求代码中：
-  - 明确 headers 来源（BoxJS / 捕获脚本持久化）
-  - 处理 gzip、超时、重试、非 2xx 响应
-- 生成的计划任务/重写片段应遵循现有 `*.snippet` 风格
-- 提供最小化变更方案，避免影响无关文件
+## 关键约定与坑点
+- 配置优先级：
+  - QX 脚本读 BoxJS；本地脚本读仓库根 `.env`。
+  - 后端启动会依次加载根 `.env` 与 `dekt_backend/.env`（系统环境变量优先）。
+- 安全红线：禁止输出或提交真实 Token/Cookie/OpenID/API Key。
+- DEKT 取消报名链路依赖 `user_id`，应通过 token 对应接口获取，不要硬编码。
+- 后端不再暴露 `/api/v1/*` 接口，网页模式仅保留页面访问与运行时展示。
+- 生成 QX 片段时，保持现有 `*.snippet`、`task.json` 风格与字段顺序，避免破坏可导入性。
 
-## 回答/解释输出偏好
-- 优先中文，分点、简洁
-- 所有脚本/命令/路径使用反引号包裹
-- 给出可复制的最小示例与落地步骤
+## 文档索引
+- 总览与脚本说明：`README.md`
+- Python 后端：`dekt_backend/README.md`
+- Python GUI：`dekt_gui_app/README.md`
+- 额外仓库约定：`CLAUDE.md`
 
-## 示例提示（可复用）
-- 生成 QX 任务：
-  - “请基于 `dekt_monitor.js` 的风格，新增一个每 5 分钟拉取活动列表并筛选学院为‘计算机学院’的任务片段（`*.snippet`），保持与现有 tag 命名一致。”
-- 本地工具增强：
-  - “为 `local_dekt_debug.js` 添加命令行参数解析，支持 `--college`、`--grade`，并给出示例运行命令。”
-- 安全修复：
-  - “审查 `card_cookie.js` 的持久化逻辑，确保不会把敏感字段打到日志里，并添加掩码处理。”
-
-## 非目标
-- 不引入重量级框架
-- 不改变 CommonJS 模块风格
-- 不输出真实敏感数据或伪造接口
-
----
-把本文件视为仓库级“工作说明”。当需要偏离时，请在回答前明确说明理由与影响。
+## 代理默认行为
+- 先说明简短方案（输入/输出、边界、错误处理），再实施改动。
+- 涉及网络请求时明确 headers 来源，处理超时、重试、压缩响应与非 2xx 返回。
+- 优先复用现有实现与文件结构，避免引入重量级框架。
+- 若需偏离本说明，先明确说明原因与影响。

@@ -36,34 +36,3 @@ def test_runtime_run_once_collects_started_unstarted_and_my_courses(monkeypatch)
     assert result.get("started_count") == 2
     assert result.get("unstarted_count") == 2
     assert result.get("my_courses_count") == 2
-
-
-def test_runtime_status_route(monkeypatch) -> None:
-    from fastapi.testclient import TestClient
-
-    import dekt_backend.security as security
-    from dekt_backend.main import app
-
-    monkeypatch.setattr(
-        security,
-        "settings",
-        SimpleNamespace(
-            api_key="unit-test-key",
-            request_ttl_seconds=300,
-            nonce_ttl_seconds=600,
-        ),
-    )
-    security._NONCE_CACHE.clear()
-
-    headers = security.build_signed_headers(
-        api_key="unit-test-key",
-        method="GET",
-        path="/api/v1/runtime/status",
-        nonce="runtime-status",
-    )
-
-    client = TestClient(app)
-    resp = client.get("/api/v1/runtime/status", headers=headers)
-
-    assert resp.status_code == 200
-    assert resp.json().get("ok") is True

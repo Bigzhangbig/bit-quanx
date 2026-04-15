@@ -1,32 +1,41 @@
-# DEKT 后端（MVP）
+# DEKT 后端（网页模式）
 
-该服务是 DEKT 前后端分离架构中的后端部分。
-它负责本地持久化运行配置，并向 GUI 暴露带签名的 HTTP API。
-
-## 安全模型（MVP）
-
-- 除健康检查外，所有接口都需要 HMAC 请求头：
-  - `X-API-Key`
-  - `X-Timestamp`
-  - `X-Nonce`
-  - `X-Signature`
-- 签名算法：`HMAC-SHA256`
-- 签名消息格式：
-  - `{timestamp}.{nonce}.{METHOD}.{PATH}.{sha256(body_bytes)}`
+该服务是 DEKT 架构中的网页后端。
+当前版本仅提供网页页面，不再提供签名 API。
 
 ## 环境变量
 
+后端启动时会自动读取以下两个位置（按顺序）：
+
+- 仓库根目录 `.env`
+- `dekt_backend/.env`
+
+若同名变量已在系统环境中存在，系统环境变量优先。
+
+推荐先复制模板：
+
 ```bash
-export DEKT_BACKEND_API_KEY="replace-with-strong-secret"
-export DEKT_BACKEND_HOST="0.0.0.0"
-export DEKT_BACKEND_PORT="8000"
-export DEKT_BACKEND_RUNTIME_ENABLED="false"
-export DEKT_BACKEND_RUNTIME_INTERVAL_SECONDS="300"
-export DEKT_BACKEND_RUNTIME_INITIAL_DELAY_SECONDS="0"
-export DEKT_BACKEND_RUNTIME_FETCH_DELAY_MAX_SECONDS="3"
+cd dekt_backend
+cp .env.example .env
 ```
 
-## 启动
+然后按需修改：
+
+```bash
+DEKT_BACKEND_HOST=0.0.0.0
+DEKT_BACKEND_PORT=8000
+DEKT_BACKEND_API_KEY=replace-with-strong-secret
+DEKT_BACKEND_REQUEST_TTL=300
+DEKT_BACKEND_NONCE_TTL=600
+DEKT_BACKEND_RUNTIME_ENABLED=false
+DEKT_BACKEND_RUNTIME_INTERVAL_SECONDS=300
+DEKT_BACKEND_RUNTIME_INITIAL_DELAY_SECONDS=0
+DEKT_BACKEND_RUNTIME_FETCH_DELAY_MAX_SECONDS=3
+```
+
+## 部署方式
+
+### 方式 1：本地前台运行（开发/调试）
 
 ```bash
 cd dekt_backend
@@ -35,60 +44,71 @@ python -m venv .venv
 .venv/bin/uvicorn dekt_backend.main:app --host 0.0.0.0 --port 8000
 ```
 
-快速启动（与上面行为一致）：
+### 方式 2：systemd 常驻（Linux 服务器）
+
+1) 先把项目放到固定路径，例如 `/opt/bit-quanx`，并完成依赖安装。
+
+2) 新建 `/etc/systemd/system/dekt-backend.service`：
+
+```ini
+[Unit]
+Description=DEKT Backend Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/bit-quanx
+EnvironmentFile=/opt/bit-quanx/dekt_backend/.env
+ExecStart=/opt/bit-quanx/.venv/bin/python -m uvicorn dekt_backend.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+3) 启动并开机自启：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now dekt-backend
+sudo systemctl status dekt-backend
+```
+
+### 方式 3：Docker 运行
+
+在仓库根目录新建或使用现有 `Dockerfile` 后，可直接：
+
+```bash
+docker run -d \
+  --name dekt-backend \
+  --restart unless-stopped \
+  --env-file ./dekt_backend/.env \
+  -p 8000:8000 \
+  bit-quanx-dekt-backend
+```
+
+若你希望，我可以下一步直接给你补一个适配当前仓库的 `dekt_backend/Dockerfile` 与 `docker-compose.yml`。
+
+## 快速启动（临时覆盖变量）
 
 ```bash
 cd dekt_backend
-DEKT_BACKEND_API_KEY="replace-with-strong-secret" \
 .venv/bin/uvicorn dekt_backend.main:app --host 0.0.0.0 --port 8000
 ```
 
-## 本地冒烟检查
+## 网页入口
 
-执行最小连通性与鉴权检查：
+- `/`：首页（网页模式说明）
+- `/health`：健康检查页面
+- `/runtime`：后台轮询状态页
+- `POST /runtime/run-now`：从网页触发一次轮询（表单提交）
 
-```bash
-cd dekt_backend
-python local_smoke.py --base-url http://127.0.0.1:8000 --api-key "replace-with-strong-secret"
-```
-
-脚本会验证：
-
-- `GET /health`（无需签名）
-- `GET /api/v1/config`（需要签名）
-- `POST /api/v1/auth/verify`（需要签名）
-
-## 课程相关接口
-
-- `GET /api/v1/courses/list?sign_status=1|2|3`：按状态获取课程列表
-- `GET /api/v1/courses/started`：获取已开始课程，等价于 `sign_status=2`
-- `GET /api/v1/courses/unstarted`：获取未开始课程，等价于 `sign_status=1`
-- `GET /api/v1/courses/my`：获取我的课程
-- `GET /api/v1/courses/{course_id}/qrcode`：返回活动二维码链接
-- `POST /api/v1/courses/{course_id}/apply`：报名
-- `POST /api/v1/courses/{course_id}/cancel`：取消报名
-- `GET /api/v1/courses/{course_id}/checkin-info`：获取签到信息
-- `POST /api/v1/courses/{course_id}/sign-in`：签到
-- `POST /api/v1/courses/{course_id}/sign-out`：签退
+说明：不再暴露 `/api/v1/*` 路由。
 
 ## 后台定时运行
 
 当 `DEKT_BACKEND_RUNTIME_ENABLED=true` 时，服务启动后会进入后台轮询，周期性拉取已开始课程、未开始课程和我的课程，并在每轮中加入随机抖动，避免请求过于集中。
-
-可用接口查看或手动触发：
-
-- `GET /api/v1/runtime/status`
-- `POST /api/v1/runtime/run-now`
-
-可选 token 验证：
-
-```bash
-cd dekt_backend
-python local_smoke.py \
-  --base-url http://127.0.0.1:8000 \
-  --api-key "replace-with-strong-secret" \
-  --token "Bearer your-token"
-```
 
 ## 配置存储
 
