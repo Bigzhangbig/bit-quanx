@@ -52,8 +52,20 @@ from .api_client import (
     verify_token,
 )
 from .activities_mixin import ActivitiesMixin
+from .calendar_widget import CalendarWidget
+from .calendar_utils import (
+    CalendarEvent,
+    build_display_location,
+    extract_time_place_fields,
+    normalize_display_text,
+    parse_event_from_list_my_courses,
+    parse_event_from_list_courses,
+    enrich_event_with_detail,
+)
+from .calendar_state import apply_enrollment_delta
 from .config import AppConfig, load_config, save_config
 from .constants import CATEGORIES, STATUS_MAP
+from .ics_exporter import export_events_to_ics_file
 from .qrcode_dialog import QRCodeDialog
 from .worker import Worker
 
@@ -72,6 +84,8 @@ class MainWindow(ActivitiesMixin, QMainWindow):
         self._cover_waiters: dict[str, list[tuple[QTableWidget, int, int]]] = {}
         self._cover_loading_urls: set[str] = set()
         self._activities_items_cache: list[dict[str, Any]] = []
+        self._calendar_events_cache: list[CalendarEvent] = []
+        self._calendar_my_course_ids_cache: set[int] = set()
 
         self.token_input = QLineEdit(self.config.token)
         self.token_input.setPlaceholderText("Bearer xxx 或原始 token")
@@ -169,6 +183,14 @@ class MainWindow(ActivitiesMixin, QMainWindow):
         self.activities_checkin_filter_combo.setCurrentIndex(1 if self.config.activities_has_checkin_only else 0)
         self.activities_checkin_filter_combo.currentIndexChanged.connect(self._on_activities_filter_changed)
 
+        # 日历widget
+        self.calendar_widget = CalendarWidget()
+        self.calendar_widget.on_signup_callback = self.on_calendar_signup
+        self.calendar_widget.on_cancel_callback = self.on_calendar_cancel
+        self.calendar_widget.on_checkin_callback = self.on_calendar_checkin
+        self.calendar_widget.on_detail_callback = self.on_calendar_detail
+        self.calendar_widget.on_export_ics_callback = self.on_calendar_export_ics
+
         self.status_label = QLabel("就绪")
         self.log_box = QPlainTextEdit()
         self.log_box.setReadOnly(True)
@@ -185,6 +207,7 @@ class MainWindow(ActivitiesMixin, QMainWindow):
         self.main_tabs.addTab(self._build_monitor_tab(), "监控")
         self.main_tabs.addTab(self._build_sign_tab(), "打卡")
         self.main_tabs.addTab(self._build_activities_tab(), "活动")
+        self.main_tabs.addTab(self._build_calendar_tab(), "日历")
         self.main_tabs.currentChanged.connect(self._on_main_tab_changed)
 
         logs_panel = QWidget()
@@ -305,6 +328,10 @@ class MainWindow(ActivitiesMixin, QMainWindow):
         layout.addWidget(self.activities_table, 1)
         return tab
 
+    def _build_calendar_tab(self) -> QWidget:
+        """构建日历标签页。"""
+        return self.calendar_widget
+
     def _on_main_tab_changed(self, index: int) -> None:
         if index < 0:
             return
@@ -315,6 +342,8 @@ class MainWindow(ActivitiesMixin, QMainWindow):
             self.on_sign_refresh(silent_if_no_token=True)
         elif tab_name == "活动":
             self.on_activities_refresh(silent_if_no_token=True)
+        elif tab_name == "日历":
+            self.on_calendar_refresh(silent_if_no_token=True)
 
     def on_sign_refresh(self, silent_if_no_token: bool = False) -> None:
         insecure = self.tls_insecure_checkbox.isChecked()
@@ -348,14 +377,23 @@ class MainWindow(ActivitiesMixin, QMainWindow):
             self._set_status(f"加载可签到活动失败: {msg}")
             return
 
+        def _sign_sort_key(course: dict[str, Any]) -> tuple[datetime, int]:
+            sign_in_start_raw = str(course.get("sign_in_start_time") or "")
+            # 签到时间为空时放到最后；同为空时按活动ID升序。
+            sign_in_dt = self._parse_time(sign_in_start_raw) or datetime.max
+            raw_id = course.get("id") or course.get("course_id")
+            try:
+                cid = int(raw_id) if raw_id is not None else -1
+            except (TypeError, ValueError):
+                cid = -1
+            return sign_in_dt, cid
+
         self.sign_table.setRowCount(0)
-        row_idx = 0
+        render_courses: list[dict[str, Any]] = []
         for course in items:
             if not isinstance(course, dict):
                 continue
 
-            course_id = str(course.get("id") or course.get("course_id") or "")
-            title = str(course.get("title") or course.get("course_title") or "")
             sign_in_window = self._window_text(
                 str(course.get("sign_in_start_time") or ""),
                 str(course.get("sign_in_end_time") or ""),
@@ -374,6 +412,23 @@ class MainWindow(ActivitiesMixin, QMainWindow):
             end_dt = self._parse_time(end_raw)
             if end_dt is not None and end_dt < datetime.now():
                 continue
+
+            render_courses.append(course)
+
+        render_courses.sort(key=_sign_sort_key)
+
+        row_idx = 0
+        for course in render_courses:
+            course_id = str(course.get("id") or course.get("course_id") or "")
+            title = str(course.get("title") or course.get("course_title") or "")
+            sign_in_window = self._window_text(
+                str(course.get("sign_in_start_time") or ""),
+                str(course.get("sign_in_end_time") or ""),
+            )
+            sign_out_window = self._window_text(
+                str(course.get("sign_out_start_time") or ""),
+                str(course.get("sign_out_end_time") or ""),
+            )
 
             self.sign_table.insertRow(row_idx)
 
@@ -639,11 +694,39 @@ class MainWindow(ActivitiesMixin, QMainWindow):
             return
 
         menu = QMenu(table)
+        cancel_action = menu.addAction("取消报名")
+        menu.addSeparator()
         qrcode_action = menu.addAction("查看二维码")
 
         selected = menu.exec(table.viewport().mapToGlobal(pos))
-        if selected is qrcode_action:
+        if selected is cancel_action:
+            self._run_activities_course_action("cancel", course_item.text().strip())
+        elif selected is qrcode_action:
             self._show_qrcode_dialog(table, row)
+
+    def _run_activities_course_action(self, action: str, course_id_text: str) -> None:
+        token = self.token_input.text().strip()
+        if not token:
+            QMessageBox.warning(self, "提示", "Token 为空")
+            return
+
+        if not course_id_text.isdigit():
+            QMessageBox.warning(self, "提示", f"无效课程 ID: {course_id_text}")
+            return
+
+        course_id = int(course_id_text)
+        insecure = self.tls_insecure_checkbox.isChecked()
+        self._set_status(f"正在执行 {action}（课程 {course_id}）...")
+
+        worker = Worker(self._monitor_course_action_task, token, action, course_id, insecure)
+        worker.signals.done.connect(self._on_activities_course_action_done)
+        self.pool.start(worker)
+
+    def _on_activities_course_action_done(self, result: tuple[bool, str]) -> None:
+        ok, msg = result
+        self._set_status(msg)
+        if ok:
+            self.on_activities_refresh(silent_if_no_token=True)
 
     def _on_monitor_item_double_clicked(self, item: QTableWidgetItem) -> None:
         table = item.tableWidget()
@@ -1481,8 +1564,14 @@ class MainWindow(ActivitiesMixin, QMainWindow):
         detail_text = self._activity_detail_text(course_obj)
         cover_url = self._cover_url(course_obj)
 
-        place_text = self._first_non_empty(course_obj, ['place', 'location', 'address'])
-        act_start_text = self._first_non_empty(course_obj, ['activity_start_time', 'start_time'])
+        time_place_text = self._first_non_empty(course_obj, ['time_place'])
+        parsed_time_text, parsed_place_text = extract_time_place_fields(time_place_text)
+
+        place_text = build_display_location(
+            time_place_text,
+            self._first_non_empty(course_obj, ['place', 'location', 'address']) or parsed_place_text,
+        )
+        act_start_text = self._first_non_empty(course_obj, ['activity_start_time', 'start_time']) or parsed_time_text
         act_end_text = self._first_non_empty(course_obj, ['activity_end_time', 'end_time'])
 
         sign_in_start = self._first_non_empty(course_obj, ['sign_in_start_time'])
@@ -1894,4 +1983,357 @@ class MainWindow(ActivitiesMixin, QMainWindow):
             self._set_status(f"监控已加载 {total_count} 门课程；{failed_count}/6 个栏目查询失败")
         else:
             self._set_status(f"监控已加载 {total_count} 门课程（共 6 个栏目）")
+
+    # ============ 日历功能 ============
+
+    def on_calendar_refresh(self, silent_if_no_token: bool = False) -> None:
+        """刷新日历数据。"""
+        insecure = self.tls_insecure_checkbox.isChecked()
+        token = self.token_input.text().strip()
+        
+        if not token:
+            if not silent_if_no_token:
+                QMessageBox.warning(self, "提示", "Token 为空")
+            return
+
+        if self._calendar_events_cache:
+            # 优先展示最近一次成功数据，避免刷新期间页面空白。
+            self.calendar_widget.load_events(
+                list(self._calendar_events_cache),
+                set(self._calendar_my_course_ids_cache),
+            )
+            self._set_status(f"正在加载日历数据...（先显示缓存 {len(self._calendar_events_cache)} 个活动）")
+        else:
+            self._set_status("正在加载日历数据...")
+
+        worker = Worker(self._fetch_calendar_events, token, insecure)
+        worker.signals.done.connect(self._on_calendar_refresh_done)
+        self.pool.start(worker)
+
+    def _fetch_calendar_events(
+        self, token: str, insecure: bool
+    ) -> tuple[list[CalendarEvent], set[int], str]:
+        """获取日历事件数据。"""
+        # 获取已报名的活动
+        ok1, msg1, my_courses = list_my_courses(
+            token=token,
+            limit=200,
+            timeout=15.0,
+            insecure_tls=insecure,
+        )
+        
+        if not ok1:
+            return [], set(), f"获取已报名活动失败: {msg1}"
+        
+        # 获取已报名的ID集合
+        ok2, msg2, my_course_ids = list_my_course_ids(
+            token=token,
+            limit=200,
+            timeout=15.0,
+            insecure_tls=insecure,
+        )
+
+        # 转换为CalendarEvent
+        my_events = parse_event_from_list_my_courses(my_courses)
+
+        # my_course_ids接口偶发失败时，兜底用“我的活动”列表提取ID。
+        if not ok2:
+            my_course_ids = set()
+        if not my_course_ids:
+            my_course_ids = {event.id for event in my_events if event.id > 0}
+        
+        # 获取未报名的活动（6个栏目）
+        all_events = my_events.copy()
+        for cid, _ in CATEGORIES:
+            ok3, msg3, courses = list_courses(
+                token=token,
+                sign_status=2,  # 进行中
+                transcript_index_id=cid,
+                limit=20,
+                timeout=15.0,
+                insecure_tls=insecure,
+            )
+            
+            if ok3:
+                unrolled_events = parse_event_from_list_courses(courses)
+                # 过滤已报名的
+                for event in unrolled_events:
+                    if event.id not in my_course_ids:
+                        all_events.append(event)
+
+        # 按活动ID去重，保留首次出现（优先保留已报名活动信息）。
+        unique_events: list[CalendarEvent] = []
+        seen_ids: set[int] = set()
+        for event in all_events:
+            if event.id <= 0:
+                unique_events.append(event)
+                continue
+            if event.id in seen_ids:
+                continue
+            seen_ids.add(event.id)
+            unique_events.append(event)
+
+        return unique_events, my_course_ids, "OK"
+
+    def _on_calendar_refresh_done(self, result) -> None:
+        """日历加载完成回调。"""
+        all_events, my_course_ids, msg = result
+        
+        if msg != "OK":
+            if self._calendar_events_cache:
+                self._set_status(f"{msg}（已保留并显示缓存数据）")
+            else:
+                self._set_status(msg)
+            return
+
+        self._calendar_events_cache = list(all_events)
+        self._calendar_my_course_ids_cache = set(my_course_ids)
+
+        # 加载到calendar_widget
+        self.calendar_widget.load_events(all_events, my_course_ids)
+        self._set_status(f"日历已加载 {len(all_events)} 个活动")
+
+    def on_calendar_signup(self, course_id: int) -> None:
+        """日历报名。"""
+        token = self.token_input.text().strip()
+        if not token:
+            QMessageBox.warning(self, "提示", "Token 为空")
+            return
+        
+        self._set_status(f"正在报名活动 {course_id}...")
+        insecure = self.tls_insecure_checkbox.isChecked()
+        worker = Worker(apply_course, token, course_id, DEFAULT_TEMPLATE_ID, 12.0, insecure)
+        worker.signals.done.connect(
+            lambda result: self._on_calendar_action_result("报名", course_id, result)
+        )
+        self.pool.start(worker)
+
+    def on_calendar_cancel(self, course_id: int) -> None:
+        """日历取消报名。"""
+        token = self.token_input.text().strip()
+        if not token:
+            QMessageBox.warning(self, "提示", "Token 为空")
+            return
+        
+        # 先获取user_id
+        self._set_status(f"正在取消报名活动 {course_id}...")
+        insecure = self.tls_insecure_checkbox.isChecked()
+        worker = Worker(self._do_cancel_course, token, course_id, insecure)
+        worker.signals.done.connect(
+            lambda result: self._on_calendar_action_result("取消报名", course_id, result)
+        )
+        self.pool.start(worker)
+
+    def _do_cancel_course(self, token: str, course_id: int, insecure: bool) -> tuple[bool, str]:
+        """执行取消报名（先获取user_id）。"""
+        ok, user_id, msg = get_user_id(token, 12.0, insecure)
+        if not ok:
+            return False, f"获取用户ID失败: {msg}"
+        
+        return cancel_course(token, course_id, int(user_id), 12.0, insecure)
+
+    def on_calendar_checkin(self, course_id: int) -> None:
+        """日历打卡（签到/签退）。"""
+        token = self.token_input.text().strip()
+        if not token:
+            QMessageBox.warning(self, "提示", "Token 为空")
+            return
+        
+        self._set_status(f"正在获取打卡信息 {course_id}...")
+        insecure = self.tls_insecure_checkbox.isChecked()
+        worker = Worker(self._do_checkin, token, course_id, insecure)
+        worker.signals.done.connect(self._on_calendar_checkin_done)
+        self.pool.start(worker)
+
+    def _do_checkin(self, token: str, course_id: int, insecure: bool) -> tuple[bool, str, dict]:
+        """执行打卡。"""
+        ok, msg, checkin_info = get_checkin_info(token, course_id, 12.0, insecure)
+        if not ok:
+            return False, f"获取打卡信息失败: {msg}", {}
+        
+        # 获取打卡地点
+        addresses = checkin_info.get("sign_in_address", [])
+        if not addresses:
+            return False, "无可用的打卡地点", {}
+        
+        address_obj = addresses[0]
+        address = address_obj.get("address", "")
+        latitude = float(address_obj.get("latitude", 0))
+        longitude = float(address_obj.get("longitude", 0))
+        
+        ok, msg = submit_sign_action(token, course_id, address, latitude, longitude, 12.0, insecure)
+        return ok, msg, checkin_info
+
+    def _on_calendar_checkin_done(self, result) -> None:
+        """打卡完成回调。"""
+        ok, msg, _ = result
+        if ok:
+            self._set_status(f"打卡成功: {msg}")
+            # 刷新日历
+            self.on_calendar_refresh(silent_if_no_token=True)
+        else:
+            self._set_status(f"打卡失败: {msg}")
+
+    def _on_calendar_action_result(self, action_name: str, course_id: int, result: object) -> None:
+        """统一处理日历报名/取消报名的 worker 结果。"""
+        if not isinstance(result, tuple) or len(result) != 2:
+            self._set_status(f"{action_name}失败: 返回结果格式异常")
+            return
+
+        ok_raw, msg_raw = result
+        self._on_calendar_action_done(action_name, bool(ok_raw), str(msg_raw), course_id)
+
+    def _sync_calendar_enrollment_cache(self, course_id: int, enrolled: bool) -> None:
+        """同步已报名活动缓存，并立即刷新日历视图。"""
+        self._calendar_my_course_ids_cache = apply_enrollment_delta(
+            self._calendar_my_course_ids_cache,
+            course_id,
+            enrolled,
+        )
+
+        if self._calendar_events_cache:
+            self.calendar_widget.load_events(
+                list(self._calendar_events_cache),
+                set(self._calendar_my_course_ids_cache),
+            )
+
+    def _on_calendar_action_done(
+        self,
+        action_name: str,
+        ok: bool,
+        msg: str,
+        course_id: int | None = None,
+    ) -> None:
+        """日历操作完成回调。"""
+        if ok:
+            if course_id is not None:
+                if action_name == "取消报名":
+                    self._sync_calendar_enrollment_cache(course_id, enrolled=False)
+                elif action_name == "报名":
+                    self._sync_calendar_enrollment_cache(course_id, enrolled=True)
+
+            self._set_status(f"{action_name}成功: {msg}")
+            # 刷新日历
+            self.on_calendar_refresh(silent_if_no_token=True)
+        else:
+            self._set_status(f"{action_name}失败: {msg}")
+
+    def on_calendar_detail(self, course_id: int) -> None:
+        """查看日历活动详情。"""
+        token = self.token_input.text().strip()
+        if not token:
+            QMessageBox.warning(self, "提示", "Token 为空")
+            return
+        
+        self._set_status(f"正在加载活动详情 {course_id}...")
+        insecure = self.tls_insecure_checkbox.isChecked()
+        worker = Worker(get_course_detail, token, course_id, 12.0, insecure)
+        worker.signals.done.connect(self._on_calendar_detail_done)
+        self.pool.start(worker)
+
+    def _on_calendar_detail_done(self, result) -> None:
+        """活动详情加载完成。"""
+        ok, msg, detail = result
+        
+        if not ok:
+            QMessageBox.warning(self, "错误", f"加载详情失败: {msg}")
+            return
+        
+        # 显示详情对话框（复用现有的dialog风格）
+        dialog = QDialog(self)
+        dialog.setWindowTitle(detail.get("title", "活动详情"))
+        dialog.resize(600, 500)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # 创建详情内容
+        details_text = self._format_event_detail(detail)
+        text_browser = QTextBrowser()
+        text_browser.setHtml(details_text)
+        layout.addWidget(text_browser)
+        
+        # 关闭按钮
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        
+        dialog.exec()
+
+    def _format_event_detail(self, detail: dict) -> str:
+        """格式化活动详情为HTML。"""
+        html_parts = []
+        
+        # 标题
+        title = detail.get("title", "未命名")
+        html_parts.append(f"<h2>{escape(title)}</h2>")
+        
+        # 基础信息表格
+        html_parts.append("<table style='width:100%; border-collapse:collapse;'>")
+        
+        # 时间
+        time_place_text = self._first_non_empty(detail, ["time_place"])
+        parsed_time_text, parsed_place_text = extract_time_place_fields(time_place_text)
+
+        start_time = detail.get("activity_start_time", "") or parsed_time_text
+        end_time = detail.get("activity_end_time", "")
+        if start_time or end_time:
+            html_parts.append(f"<tr><td style='padding:5px;'><b>时间:</b></td><td style='padding:5px;'>{escape(start_time or '')} ~ {escape(end_time or '')}</td></tr>")
+        
+        # 地点
+        location = build_display_location(time_place_text, detail.get("location", "") or parsed_place_text)
+        if location:
+            html_parts.append(f"<tr><td style='padding:5px;'><b>地点:</b></td><td style='padding:5px;'>{escape(location)}</td></tr>")
+        
+        # 报名信息
+        max_num = detail.get("max", "")
+        apply_count = detail.get("course_apply_count", "")
+        if max_num and apply_count:
+            html_parts.append(f"<tr><td style='padding:5px;'><b>报名:</b></td><td style='padding:5px;'>{apply_count}/{max_num}</td></tr>")
+        
+        # 时长
+        duration = detail.get("duration", "")
+        if duration:
+            html_parts.append(f"<tr><td style='padding:5px;'><b>时长:</b></td><td style='padding:5px;'>{escape(str(duration))}</td></tr>")
+        
+        # 联系方式
+        contact_name = detail.get("contact_name", "")
+        contact_phone = detail.get("contact_phone", "")
+        if contact_name or contact_phone:
+            contact = f"{contact_name or ''} {contact_phone or ''}".strip()
+            html_parts.append(f"<tr><td style='padding:5px;'><b>联系:</b></td><td style='padding:5px;'>{escape(contact)}</td></tr>")
+        
+        html_parts.append("</table>")
+        
+        # 详情内容
+        detail_text = self._activity_detail_text(detail)
+        html_parts.append(self._activity_detail_section_html(detail_text))
+        
+        return "".join(html_parts)
+
+    def on_calendar_export_ics(self, events) -> None:
+        """导出日历为ICS文件。"""
+        if not events:
+            QMessageBox.warning(self, "提示", "没有活动可导出")
+            return
+        
+        # 打开保存对话框
+        from PySide6.QtWidgets import QFileDialog
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "导出ICS文件",
+            "calendar.ics",
+            "iCalendar Files (*.ics)"
+        )
+        
+        if not file_path:
+            return
+        
+        # 导出
+        ok = export_events_to_ics_file(events, file_path, "DEKT活动日历")
+        if ok:
+            self._set_status(f"ICS文件已导出: {file_path}")
+            QMessageBox.information(self, "成功", "ICS文件导出成功")
+        else:
+            self._set_status("ICS文件导出失败")
+            QMessageBox.warning(self, "失败", "ICS文件导出失败")
 

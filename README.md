@@ -1,4 +1,4 @@
-# 北理工 Quantumult X 脚本合集
+# 北理工 自用学习脚本合集
 
 本项目包含 Quantumult X 脚本。
 

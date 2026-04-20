@@ -25,6 +25,7 @@ cp .env.example .env
 DEKT_BACKEND_HOST=0.0.0.0
 DEKT_BACKEND_PORT=8000
 DEKT_BACKEND_API_KEY=replace-with-strong-secret
+DEKT_BACKEND_WEB_KEY=replace-with-web-login-key
 DEKT_BACKEND_REQUEST_TTL=300
 DEKT_BACKEND_NONCE_TTL=600
 DEKT_BACKEND_RUNTIME_ENABLED=false
@@ -99,12 +100,20 @@ cd dekt_backend
 
 ## 网页入口
 
+- `/auth`：网页登录（使用自定义访问密钥）
 - `/`：首页（网页模式说明）
 - `/health`：健康检查页面
 - `/runtime`：后台轮询状态页
+- `/calendar`：活动日历页面（使用后端已保存 token）
 - `POST /runtime/run-now`：从网页触发一次轮询（表单提交）
 
 说明：不再暴露 `/api/v1/*` 路由。
+
+## 网页访问密钥
+
+- 推荐使用 `DEKT_BACKEND_WEB_KEY` 作为网页访问密钥。
+- 若未配置 `DEKT_BACKEND_WEB_KEY`，会回退到 `DEKT_BACKEND_API_KEY`。
+- 首次访问受保护页面会提示登录，登录成功后以 Cookie 维持会话。
 
 ## 后台定时运行
 

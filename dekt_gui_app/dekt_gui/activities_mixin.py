@@ -1,14 +1,129 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QMessageBox, QTableWidgetItem
 
 from .worker import Worker
 
 
 class ActivitiesMixin:
+    def _course_id_int(self: Any, course: dict[str, Any]) -> int:
+        raw_id = course.get("id") or course.get("course_id")
+        try:
+            return int(raw_id)
+        except (TypeError, ValueError):
+            return -1
+
+    def _sign_in_start_dt(self: Any, course: dict[str, Any]) -> datetime:
+        raw = str(course.get("sign_in_start_time") or "").strip()
+        if not raw:
+            return datetime.max
+
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                return datetime.strptime(raw, fmt)
+            except ValueError:
+                continue
+        return datetime.max
+
+    def _sort_activities_items(self: Any, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """活动页排序：未完成优先，未完成按签到时间升序，已完成按ID降序。"""
+        unfinished: list[dict[str, Any]] = []
+        completed: list[dict[str, Any]] = []
+
+        for course in items:
+            if self._is_course_completed(course):
+                completed.append(course)
+            else:
+                unfinished.append(course)
+
+        unfinished.sort(
+            key=lambda course: (
+                self._sign_in_start_dt(course),
+                self._course_id_int(course),
+            )
+        )
+        completed.sort(key=self._course_id_int, reverse=True)
+        return unfinished + completed
+
+    def _is_course_completed(self: Any, course: dict[str, Any]) -> bool:
+        """判断活动是否已完成（用于活动页灰显）。"""
+        if not isinstance(course, dict):
+            return False
+
+        # 优先使用课程签到状态。
+        sign_status = course.get("sign_status")
+        try:
+            if sign_status is not None and int(sign_status) == 3:
+                return True
+        except (TypeError, ValueError):
+            pass
+
+        labels = [
+            str(course.get("sign_status_label") or "").strip(),
+            str(course.get("checkin_status_label") or "").strip(),
+            str(course.get("status_label") or "").strip(),
+        ]
+        for label in labels:
+            if not label:
+                continue
+            if any(key in label for key in ("已完成", "完成", "已结束")):
+                return True
+
+        # 有些接口会给完成时间字段。
+        if course.get("complate_time") or course.get("complete_time"):
+            return True
+
+        return False
+
+    def _apply_completed_row_style(self: Any, row_idx: int) -> None:
+        text_color = QColor("#8A8F98")
+        bg_color = QColor("#F6F7F9")
+        for col in range(self.activities_table.columnCount()):
+            item = self.activities_table.item(row_idx, col)
+            if item is None:
+                continue
+            item.setForeground(text_color)
+            item.setBackground(bg_color)
+
+    def _is_course_in_progress(self: Any, course: dict[str, Any]) -> bool:
+        """判断活动是否进行中（用于活动页浅绿高亮）。"""
+        if not isinstance(course, dict):
+            return False
+
+        sign_status = course.get("sign_status")
+        try:
+            if sign_status is not None and int(sign_status) == 2:
+                return True
+        except (TypeError, ValueError):
+            pass
+
+        labels = [
+            str(course.get("sign_status_label") or "").strip(),
+            str(course.get("checkin_status_label") or "").strip(),
+        ]
+        for label in labels:
+            if not label:
+                continue
+            if any(key in label for key in ("进行中", "待签到", "待签退", "待打卡")):
+                return True
+
+        return False
+
+    def _apply_in_progress_row_style(self: Any, row_idx: int) -> None:
+        text_color = QColor("#1F6F43")
+        bg_color = QColor("#EEF9F1")
+        for col in range(self.activities_table.columnCount()):
+            item = self.activities_table.item(row_idx, col)
+            if item is None:
+                continue
+            item.setForeground(text_color)
+            item.setBackground(bg_color)
+
     def on_activities_refresh(self: Any, silent_if_no_token: bool = False) -> None:
         insecure = self.tls_insecure_checkbox.isChecked()
         token = self.token_input.text().strip()
@@ -53,8 +168,9 @@ class ActivitiesMixin:
 
     def _filtered_activities_items(self: Any) -> list[dict[str, Any]]:
         if not self._activities_checkin_only():
-            return list(self._activities_items_cache)
-        return [course for course in self._activities_items_cache if self._has_checkin_window(course)]
+            return self._sort_activities_items(list(self._activities_items_cache))
+        filtered = [course for course in self._activities_items_cache if self._has_checkin_window(course)]
+        return self._sort_activities_items(filtered)
 
     def _render_activities_table(self: Any, items: list[dict[str, Any]]) -> None:
         self.activities_table.setRowCount(0)
@@ -95,6 +211,11 @@ class ActivitiesMixin:
                 course_payload = dict(course)
                 course_payload["__enrolled"] = True
                 id_item.setData(Qt.ItemDataRole.UserRole, course_payload)
+
+            if self._is_course_completed(course):
+                self._apply_completed_row_style(row_idx)
+            elif self._is_course_in_progress(course):
+                self._apply_in_progress_row_style(row_idx)
 
         self.activities_table.resizeColumnsToContents()
         self.activities_table.setColumnWidth(1, 72)
