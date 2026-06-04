@@ -394,6 +394,27 @@ class MainWindow(CalendarMixin, MonitorMixin, ImageMixin, DetailMixin, Activitie
         worker.signals.done.connect(self._on_sign_refresh_done)
         self.pool.start(worker)
 
+    def on_profile_refresh(self, silent_if_no_token: bool = False) -> None:
+        insecure = self.tls_insecure_checkbox.isChecked()
+        token = self.token_input.text().strip()
+        if not token:
+            if not silent_if_no_token:
+                QMessageBox.warning(self, "提示", "Token 为空")
+            return
+
+        self._set_status("正在加载个人成绩...")
+        worker = Worker(get_transcript_score, token, 12.0, insecure)
+        worker.signals.done.connect(self._on_profile_refresh_done)
+        self.pool.start(worker)
+
+    def _on_profile_refresh_done(self, result: tuple[bool, str, dict[str, Any]]) -> None:
+        ok, msg, data = result
+        if not ok:
+            self._set_status(f"加载个人成绩失败: {msg}")
+            return
+        self.profile_widget.update_data(data)
+        self._set_status("个人成绩加载完成")
+
     def _fetch_my_courses(self, token: str, insecure: bool) -> tuple[bool, str, list[dict[str, Any]]]:
         return list_my_courses(
             token=token,

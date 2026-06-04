@@ -16,19 +16,18 @@ All JavaScript files are stored under `scripts/`.
 
 ### JavaScript / Node.js
 
-- Install the only runtime dependency: `npm install` (or `bun install`)
+- Install dependencies: `bun install` (preferred) or `npm install`
 - Run a local debug script: `node scripts/local_dekt_monitor.js` or `node scripts/local_card_probe.js`
 
 ### Python Backend (`dekt_backend/`)
 
 - Install and run (from repo root):
   ```bash
-  cd dekt_backend
-  python -m venv .venv
-  .venv/bin/pip install -r requirements.txt
-  .venv/bin/uvicorn dekt_backend.main:app --host 0.0.0.0 --port 8000
+  uv sync --extra backend
+  uv run --extra backend uvicorn dekt_backend.main:app --host 0.0.0.0 --port 8000
   ```
-- Run tests: `pytest -q dekt_backend/tests`
+- Run tests: `uv run --extra backend pytest -q dekt_backend/tests`
+- Run a single test file: `uv run --extra backend pytest -q dekt_backend/tests/test_main.py`
 - Web mode quick check:
   ```bash
   curl -i http://127.0.0.1:8000/
@@ -40,19 +39,18 @@ All JavaScript files are stored under `scripts/`.
 
 - Install and run:
   ```bash
-  cd dekt_gui_app
-  python -m venv .venv
-  .venv/bin/pip install -r requirements.txt
-  .venv/bin/python main.py
+  uv sync --extra gui
+  uv run --extra gui python dekt_gui_app/main.py
   ```
-- Build macOS app (requires `pyinstaller`):
+- Run GUI tests: `uv run --extra gui pytest -q dekt_gui_app/tests`
+- Build macOS app (requires `pyinstaller`, not in pyproject.toml — install separately):
   ```bash
-  .venv/bin/python -m PyInstaller --noconfirm --clean --windowed --name DEKT-GUI --paths . main.py
+  uv run --extra gui python -m PyInstaller --noconfirm --clean --windowed --name DEKT-GUI --paths . dekt_gui_app/main.py
   ```
 
 ### CI / Lint
 
-- Syntax check for both Python packages: `python -m compileall dekt_backend dekt_gui_app`
+- Syntax check for both Python packages: `python -m compileall dekt_backend dekt_gui_app/dekt_gui dekt_gui_app/main.py`
 - Tests are run via `pytest -q dekt_backend/tests` (see `.github/workflows/ci-python.yml`)
 
 ## High-Level Architecture
@@ -81,7 +79,7 @@ All JavaScript files are stored under `scripts/`.
   - Config is persisted at `~/.dekt_gui/config.json`.
   - Defaults can be seeded from `dekt_gui_app/.env`.
 
-- **Shared client layer**: `dekt_gui_app/dekt_gui/api_client.py` contains the core HTTP client for DEKT and GitHub Gist. It is imported by GUI and backend runtime. Because the backend imports from `dekt_gui_app`, `dekt_gui_app` must be on `PYTHONPATH` when the backend runs.
+- **Shared client layer**: `dekt_gui_app/dekt_gui/api_client.py` contains the core HTTP client for DEKT and GitHub Gist. It is imported by GUI and backend runtime. `uv run` handles PYTHONPATH automatically.
 
 ### Configuration Files
 
