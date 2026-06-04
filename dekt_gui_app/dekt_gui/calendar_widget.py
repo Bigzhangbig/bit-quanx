@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Callable
 
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import Qt, QDate, QTimer
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -28,6 +28,7 @@ from .calendar_utils import (
     is_in_checkin_window,
     is_in_checkout_window,
     normalize_display_text,
+    summarize_event_day_completion,
 )
 
 
@@ -48,7 +49,13 @@ class CalendarWidget(QWidget):
         self.on_checkin_callback: Callable[[int], None] | None = None
         self.on_detail_callback: Callable[[int], None] | None = None
         self.on_export_ics_callback: Callable[[list[CalendarEvent]], None] | None = None
-        
+
+        # 搜索防抖定时器
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(300)
+        self._search_timer.timeout.connect(self._apply_filter)
+
         self._init_ui()
     
     def _init_ui(self):
@@ -155,8 +162,8 @@ class CalendarWidget(QWidget):
         self._apply_filter()
     
     def _on_search_changed(self):
-        """搜索文本改变。"""
-        self._apply_filter()
+        """搜索文本改变（防抖）。"""
+        self._search_timer.start()
 
     def _jump_to_today(self):
         """跳转到今天。"""
@@ -174,23 +181,33 @@ class CalendarWidget(QWidget):
         self._highlighted_dates.clear()
 
         # 统计筛选后事件日期（用于高亮）。
-        event_dates: dict[QDate, int] = {}
+        event_dates: set[QDate] = set()
         for event in self.events:
             if not event.start_time:
                 continue
             date_key = QDate(event.start_time.year, event.start_time.month, event.start_time.day)
-            event_dates[date_key] = event_dates.get(date_key, 0) + 1
+            event_dates.add(date_key)
 
         if not event_dates:
             return
 
-        highlight_fmt = QTextCharFormat()
-        highlight_fmt.setBackground(QColor("#E6F4EA"))
-        highlight_fmt.setForeground(QColor("#0B6B3A"))
-        highlight_fmt.setFontWeight(QFont.Weight.Bold)
+        completed_days = summarize_event_day_completion(self.events)
+
+        active_fmt = QTextCharFormat()
+        active_fmt.setBackground(QColor("#E6F4EA"))
+        active_fmt.setForeground(QColor("#0B6B3A"))
+        active_fmt.setFontWeight(QFont.Weight.Bold)
+
+        completed_fmt = QTextCharFormat()
+        completed_fmt.setBackground(QColor("#F3F4F6"))
+        completed_fmt.setForeground(QColor("#9AA0A6"))
+        completed_fmt.setFontWeight(QFont.Weight.Normal)
 
         for date in event_dates:
-            self.calendar.setDateTextFormat(date, highlight_fmt)
+            if completed_days.get((date.year(), date.month(), date.day()), False):
+                self.calendar.setDateTextFormat(date, completed_fmt)
+            else:
+                self.calendar.setDateTextFormat(date, active_fmt)
             self._highlighted_dates.add(date)
     
     def _on_calendar_date_changed(self):
@@ -249,13 +266,16 @@ class CalendarWidget(QWidget):
                     item.setForeground(ended_text_color)
                     item.setBackground(ended_bg_color)
     
-    def _show_event_context_menu(self):
+    def _show_event_context_menu(self, pos):
         """显示事件的右键菜单。"""
-        current_row = self.events_table.currentRow()
+        current_row = self.events_table.rowAt(pos.y())
         if current_row < 0:
             return
-        
-        course_id = self.events_table.item(current_row, 0).data(Qt.ItemDataRole.UserRole)
+
+        item = self.events_table.item(current_row, 0)
+        if item is None:
+            return
+        course_id = item.data(Qt.ItemDataRole.UserRole)
         
         # 找到对应的事件
         event = None
@@ -293,14 +313,16 @@ class CalendarWidget(QWidget):
         detail_action = menu.addAction("查看详情")
         detail_action.triggered.connect(lambda: self._handle_detail(event.id))
         
-        menu.exec(self.events_table.mapToGlobal(self.events_table.pos()))
+        menu.exec(self.events_table.viewport().mapToGlobal(pos))
     
     def _on_event_item_double_clicked(self):
         """双击事件项。"""
         current_row = self.events_table.currentRow()
         if current_row >= 0:
-            course_id = self.events_table.item(current_row, 0).data(Qt.ItemDataRole.UserRole)
-            self._handle_detail(course_id)
+            item = self.events_table.item(current_row, 0)
+            if item is not None:
+                course_id = item.data(Qt.ItemDataRole.UserRole)
+                self._handle_detail(course_id)
     
     def _handle_signup(self, course_id: int):
         """处理报名。"""

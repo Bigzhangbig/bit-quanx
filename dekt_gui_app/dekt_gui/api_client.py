@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import importlib
+import os
 import io
 import json
+import time
 from typing import Any
 
 import httpx
@@ -36,6 +38,55 @@ def normalize_bearer_token(token: str) -> str:
     if raw.lower().startswith("bearer "):
         return raw
     return f"Bearer {raw}"
+
+
+def _api_request(
+    method: str,
+    path: str,
+    token: str = "",
+    *,
+    timeout: float = 12.0,
+    insecure_tls: bool = False,
+    json_body: dict[str, Any] | None = None,
+    query_params: dict[str, Any] | None = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """通用 DEKT API 请求。返回 (ok, message, response_body)。
+
+    response_body 是完整的 JSON 响应（包含 code, data, message 等字段）。
+    调用方负责从 data 中提取具体数据。错误时 response_body 为空 dict。
+    """
+    auth = normalize_bearer_token(token)
+    if not auth:
+        return False, "Token is empty", {}
+
+    url = f"{DEKT_HOST}{path}"
+    if query_params:
+        qs = "&".join(f"{k}={v}" for k, v in query_params.items() if v is not None)
+        if qs:
+            url += ("&" if "?" in url else "?") + qs
+
+    headers = {
+        "Authorization": auth,
+        "Content-Type": "application/json;charset=utf-8",
+    }
+
+    try:
+        with _create_client(timeout=timeout, insecure_tls=insecure_tls) as client:
+            resp = client.request(method, url, headers=headers, json=json_body)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"Request failed: {exc}", {}
+
+    if resp.status_code == 401:
+        return False, "Unauthorized (401)", {}
+    if resp.status_code < 200 or resp.status_code >= 300:
+        return False, f"HTTP {resp.status_code}", {}
+
+    try:
+        body: dict[str, Any] = resp.json()
+    except ValueError:
+        return False, "Invalid JSON response", {}
+
+    return True, "OK", body
 
 
 def verify_token(token: str, timeout: float = 12.0, insecure_tls: bool = False) -> VerifyResult:
@@ -140,40 +191,20 @@ def list_courses(
     timeout: float = 15.0,
     insecure_tls: bool = False,
 ) -> tuple[bool, str, list[dict[str, Any]]]:
-    auth = normalize_bearer_token(token)
-    if not auth:
-        return False, "Token is empty", []
-
-    url = (
-        f"{DEKT_HOST}/api/course/list?page=1&limit={int(limit)}"
+    path = (
+        f"/api/course/list?page=1&limit={int(limit)}"
         f"&sign_status={int(sign_status)}"
         f"&transcript_index_id={int(transcript_index_id)}"
         "&transcript_index_type_id=0"
     )
-    headers = {
-        "Authorization": auth,
-        "Content-Type": "application/json;charset=utf-8",
-    }
-
-    try:
-        with _create_client(timeout=timeout, insecure_tls=insecure_tls) as client:
-            resp = client.get(url, headers=headers)
-    except Exception as exc:  # noqa: BLE001
-        return False, f"Request failed: {exc}", []
-
-    if resp.status_code == 401:
-        return False, "Unauthorized (401)", []
-    if resp.status_code < 200 or resp.status_code >= 300:
-        return False, f"HTTP {resp.status_code}", []
-
-    try:
-        body: dict[str, Any] = resp.json()
-    except ValueError:
-        return False, "Invalid JSON response", []
+    ok, msg, body = _api_request(
+        "GET", path, token=token, timeout=timeout, insecure_tls=insecure_tls,
+    )
+    if not ok:
+        return False, msg, []
 
     if body.get("code") != 200:
-        msg = str(body.get("message") or body.get("msg") or "API error")
-        return False, msg, []
+        return False, str(body.get("message") or body.get("msg") or "API error"), []
 
     data = body.get("data")
     if not isinstance(data, dict):
@@ -192,35 +223,18 @@ def get_course_detail(
     timeout: float = 12.0,
     insecure_tls: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
-    auth = normalize_bearer_token(token)
-    if not auth:
-        return False, "Token is empty", {}
-
-    url = f"{DEKT_HOST}/api/course/info/{int(course_id)}"
-    headers = {
-        "Authorization": auth,
-        "Content-Type": "application/json;charset=utf-8",
-    }
-
-    try:
-        with _create_client(timeout=timeout, insecure_tls=insecure_tls) as client:
-            resp = client.get(url, headers=headers)
-    except Exception as exc:  # noqa: BLE001
-        return False, f"Request failed: {exc}", {}
-
-    if resp.status_code == 401:
-        return False, "Unauthorized (401)", {}
-    if resp.status_code < 200 or resp.status_code >= 300:
-        return False, f"HTTP {resp.status_code}", {}
-
-    try:
-        body: dict[str, Any] = resp.json()
-    except ValueError:
-        return False, "Invalid JSON response", {}
+    ok, msg, body = _api_request(
+        "GET",
+        f"/api/course/info/{int(course_id)}",
+        token=token,
+        timeout=timeout,
+        insecure_tls=insecure_tls,
+    )
+    if not ok:
+        return False, msg, {}
 
     if body.get("code") != 200:
-        msg = str(body.get("message") or body.get("msg") or "API error")
-        return False, msg, {}
+        return False, str(body.get("message") or body.get("msg") or "API error"), {}
 
     data = body.get("data")
     if not isinstance(data, dict):
@@ -236,40 +250,24 @@ def apply_course(
     timeout: float = 12.0,
     insecure_tls: bool = False,
 ) -> tuple[bool, str]:
-    auth = normalize_bearer_token(token)
-    if not auth:
-        return False, "Token is empty"
+    ok, msg, body = _api_request(
+        "POST",
+        "/api/course/apply",
+        token=token,
+        timeout=timeout,
+        insecure_tls=insecure_tls,
+        json_body={
+            "course_id": int(course_id),
+            "template_id": template_id,
+        },
+    )
+    if not ok:
+        return False, msg
 
-    url = f"{DEKT_HOST}/api/course/apply"
-    headers = {
-        "Authorization": auth,
-        "Content-Type": "application/json;charset=utf-8",
-    }
-    body = {
-        "course_id": int(course_id),
-        "template_id": template_id,
-    }
-
-    try:
-        with _create_client(timeout=timeout, insecure_tls=insecure_tls) as client:
-            resp = client.post(url, headers=headers, json=body)
-    except Exception as exc:  # noqa: BLE001
-        return False, f"Request failed: {exc}"
-
-    if resp.status_code == 401:
-        return False, "Unauthorized (401)"
-    if resp.status_code < 200 or resp.status_code >= 300:
-        return False, f"HTTP {resp.status_code}"
-
-    try:
-        data: dict[str, Any] = resp.json()
-    except ValueError:
-        return False, "Invalid JSON response"
-
-    msg = str(data.get("message") or data.get("msg") or "")
-    if data.get("code") == 200 or "成功" in msg or "已报名" in msg:
-        return True, msg or "报名成功"
-    return False, msg or "报名失败"
+    resp_msg = str(body.get("message") or body.get("msg") or "")
+    if body.get("code") == 200 or "成功" in resp_msg or "已报名" in resp_msg:
+        return True, resp_msg or "报名成功"
+    return False, resp_msg or "报名失败"
 
 
 def run_signup_queue(
@@ -308,32 +306,15 @@ def get_user_id(
     timeout: float = 12.0,
     insecure_tls: bool = False,
 ) -> tuple[bool, str, str]:
-    auth = normalize_bearer_token(token)
-    if not auth:
-        return False, "", "Token is empty"
-
-    headers = {"Authorization": auth}
-    url = f"{DEKT_HOST}/api/user/info"
-
-    try:
-        with _create_client(timeout=timeout, insecure_tls=insecure_tls) as client:
-            resp = client.get(url, headers=headers)
-    except Exception as exc:  # noqa: BLE001
-        return False, "", f"Request failed: {exc}"
-
-    if resp.status_code == 401:
-        return False, "", "Unauthorized (401)"
-    if resp.status_code < 200 or resp.status_code >= 300:
-        return False, "", f"HTTP {resp.status_code}"
-
-    try:
-        body: dict[str, Any] = resp.json()
-    except ValueError:
-        return False, "", "Invalid JSON response"
+    ok, msg, body = _api_request(
+        "GET", "/api/user/info", token=token, timeout=timeout, insecure_tls=insecure_tls,
+    )
+    if not ok:
+        return False, "", msg
 
     if body.get("code") != 200 or not isinstance(body.get("data"), dict):
-        msg = str(body.get("message") or body.get("msg") or "API error")
-        return False, "", msg
+        err_msg = str(body.get("message") or body.get("msg") or "API error")
+        return False, "", err_msg
 
     user_id = str(body["data"].get("id", "")).strip()
     if not user_id:
@@ -347,35 +328,18 @@ def list_my_course_ids(
     timeout: float = 12.0,
     insecure_tls: bool = False,
 ) -> tuple[bool, str, set[int]]:
-    auth = normalize_bearer_token(token)
-    if not auth:
-        return False, "Token is empty", set()
-
-    url = f"{DEKT_HOST}/api/course/list/my?page=1&limit={int(limit)}"
-    headers = {
-        "Authorization": auth,
-        "Content-Type": "application/json;charset=utf-8",
-    }
-
-    try:
-        with _create_client(timeout=timeout, insecure_tls=insecure_tls) as client:
-            resp = client.get(url, headers=headers)
-    except Exception as exc:  # noqa: BLE001
-        return False, f"Request failed: {exc}", set()
-
-    if resp.status_code == 401:
-        return False, "Unauthorized (401)", set()
-    if resp.status_code < 200 or resp.status_code >= 300:
-        return False, f"HTTP {resp.status_code}", set()
-
-    try:
-        body: dict[str, Any] = resp.json()
-    except ValueError:
-        return False, "Invalid JSON response", set()
+    ok, msg, body = _api_request(
+        "GET",
+        f"/api/course/list/my?page=1&limit={int(limit)}",
+        token=token,
+        timeout=timeout,
+        insecure_tls=insecure_tls,
+    )
+    if not ok:
+        return False, msg, set()
 
     if body.get("code") != 200:
-        msg = str(body.get("message") or body.get("msg") or "API error")
-        return False, msg, set()
+        return False, str(body.get("message") or body.get("msg") or "API error"), set()
 
     data = body.get("data")
     if not isinstance(data, dict):
@@ -405,40 +369,24 @@ def cancel_course(
     timeout: float = 12.0,
     insecure_tls: bool = False,
 ) -> tuple[bool, str]:
-    auth = normalize_bearer_token(token)
-    if not auth:
-        return False, "Token is empty"
+    ok, msg, body = _api_request(
+        "POST",
+        "/api/course/cancelApply",
+        token=token,
+        timeout=timeout,
+        insecure_tls=insecure_tls,
+        json_body={
+            "course_id": int(course_id),
+            "user_id": int(user_id),
+        },
+    )
+    if not ok:
+        return False, msg
 
-    url = f"{DEKT_HOST}/api/course/cancelApply"
-    headers = {
-        "Authorization": auth,
-        "Content-Type": "application/json;charset=utf-8",
-    }
-    body = {
-        "course_id": int(course_id),
-        "user_id": int(user_id),
-    }
-
-    try:
-        with _create_client(timeout=timeout, insecure_tls=insecure_tls) as client:
-            resp = client.post(url, headers=headers, json=body)
-    except Exception as exc:  # noqa: BLE001
-        return False, f"Request failed: {exc}"
-
-    if resp.status_code == 401:
-        return False, "Unauthorized (401)"
-    if resp.status_code < 200 or resp.status_code >= 300:
-        return False, f"HTTP {resp.status_code}"
-
-    try:
-        data: dict[str, Any] = resp.json()
-    except ValueError:
-        return False, "Invalid JSON response"
-
-    msg = str(data.get("message") or data.get("msg") or "")
-    if data.get("code") in (200, 0) or data.get("success") is True or "成功" in msg:
-        return True, msg or "取消报名成功"
-    return False, msg or "取消报名失败"
+    resp_msg = str(body.get("message") or body.get("msg") or "")
+    if body.get("code") in (200, 0) or body.get("success") is True or "成功" in resp_msg:
+        return True, resp_msg or "取消报名成功"
+    return False, resp_msg or "取消报名失败"
 
 
 def list_my_courses(
@@ -447,35 +395,18 @@ def list_my_courses(
     timeout: float = 15.0,
     insecure_tls: bool = False,
 ) -> tuple[bool, str, list[dict[str, Any]]]:
-    auth = normalize_bearer_token(token)
-    if not auth:
-        return False, "Token is empty", []
-
-    url = f"{DEKT_HOST}/api/course/list/my?page=1&limit={int(limit)}"
-    headers = {
-        "Authorization": auth,
-        "Content-Type": "application/json;charset=utf-8",
-    }
-
-    try:
-        with _create_client(timeout=timeout, insecure_tls=insecure_tls) as client:
-            resp = client.get(url, headers=headers)
-    except Exception as exc:  # noqa: BLE001
-        return False, f"Request failed: {exc}", []
-
-    if resp.status_code == 401:
-        return False, "Unauthorized (401)", []
-    if resp.status_code < 200 or resp.status_code >= 300:
-        return False, f"HTTP {resp.status_code}", []
-
-    try:
-        body: dict[str, Any] = resp.json()
-    except ValueError:
-        return False, "Invalid JSON response", []
+    ok, msg, body = _api_request(
+        "GET",
+        f"/api/course/list/my?page=1&limit={int(limit)}",
+        token=token,
+        timeout=timeout,
+        insecure_tls=insecure_tls,
+    )
+    if not ok:
+        return False, msg, []
 
     if body.get("code") != 200:
-        msg = str(body.get("message") or body.get("msg") or "API error")
-        return False, msg, []
+        return False, str(body.get("message") or body.get("msg") or "API error"), []
 
     data = body.get("data")
     if not isinstance(data, dict):
@@ -493,41 +424,31 @@ def get_checkin_info(
     timeout: float = 12.0,
     insecure_tls: bool = False,
 ) -> tuple[bool, str, dict[str, Any]]:
-    auth = normalize_bearer_token(token)
-    if not auth:
-        return False, "Token is empty", {}
-
-    url = f"{DEKT_HOST}/api/transcript/checkIn/info?course_id={int(course_id)}"
-    headers = {
-        "Authorization": auth,
-        "Content-Type": "application/json;charset=utf-8",
-    }
-
-    try:
-        with _create_client(timeout=timeout, insecure_tls=insecure_tls) as client:
-            resp = client.get(url, headers=headers)
-    except Exception as exc:  # noqa: BLE001
-        return False, f"Request failed: {exc}", {}
-
-    if resp.status_code == 401:
-        return False, "Unauthorized (401)", {}
-    if resp.status_code < 200 or resp.status_code >= 300:
-        return False, f"HTTP {resp.status_code}", {}
-
-    try:
-        body: dict[str, Any] = resp.json()
-    except ValueError:
-        return False, "Invalid JSON response", {}
+    ok, msg, body = _api_request(
+        "GET",
+        f"/api/transcript/checkIn/info?course_id={int(course_id)}",
+        token=token,
+        timeout=timeout,
+        insecure_tls=insecure_tls,
+    )
+    if not ok:
+        return False, msg, {}
 
     if body.get("code") != 200:
-        msg = str(body.get("message") or body.get("msg") or "API error")
-        return False, msg, {}
+        return False, str(body.get("message") or body.get("msg") or "API error"), {}
 
     data = body.get("data")
     if not isinstance(data, dict):
         return False, "Unexpected API response structure", {}
 
     return True, "OK", data
+
+
+def _generate_sign(timestamp_ms: int) -> str:
+    """Generate sign header for DEKT API requests."""
+    app_secret = os.environ.get("DEKT_APP_SECRET", "2GNFjVv2S7xYnoWe")
+    sign_str = f"appCode=qcbldekt&timestamp={timestamp_ms}&appSecret={app_secret}&origin=wechat"
+    return hashlib.md5(sign_str.encode()).hexdigest()
 
 
 def submit_sign_action(
@@ -544,9 +465,13 @@ def submit_sign_action(
         return False, "Token is empty"
 
     url = f"{DEKT_HOST}/api/transcript/signIn"
+    timestamp_ms = int(time.time() * 1000)
     headers = {
         "Authorization": auth,
         "Content-Type": "application/json;charset=utf-8",
+        "appCode": "qcbldekt",
+        "timestamp": str(timestamp_ms),
+        "sign": _generate_sign(timestamp_ms),
     }
     body = {
         "course_id": int(course_id),
@@ -580,7 +505,8 @@ def submit_sign_action(
 
 
 def get_qrcode_url(course_id: int) -> str:
-    return f"{DEKT_HOST}/qrcode/event/?course_id={int(course_id)}"
+    timestamp_ms = int(time.time() * 1000)
+    return f"{DEKT_HOST}/qrcode/event/?course_id={int(course_id)}&timestamp={timestamp_ms}"
 
 
 def get_qrcode_image(course_id: int) -> tuple[bool, str, bytes]:
@@ -615,3 +541,45 @@ def get_qrcode_image(course_id: int) -> tuple[bool, str, bytes]:
             pass
 
     return False, "QR generation unavailable (local dependency missing)", b""
+
+
+def get_transcript_score(
+    token: str,
+    timeout: float = 12.0,
+    insecure_tls: bool = False,
+) -> tuple[bool, str, dict[str, Any]]:
+    auth = normalize_bearer_token(token)
+    if not auth:
+        return False, "Token is empty", {}
+
+    url = f"{DEKT_HOST}/api/transcript/score"
+    headers = {
+        "Authorization": auth,
+        "Content-Type": "application/json;charset=utf-8",
+    }
+
+    try:
+        with _create_client(timeout=timeout, insecure_tls=insecure_tls) as client:
+            resp = client.get(url, headers=headers)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"Request failed: {exc}", {}
+
+    if resp.status_code == 401:
+        return False, "Unauthorized (401)", {}
+    if resp.status_code < 200 or resp.status_code >= 300:
+        return False, f"HTTP {resp.status_code}", {}
+
+    try:
+        body: dict[str, Any] = resp.json()
+    except ValueError:
+        return False, "Invalid JSON response", {}
+
+    if body.get("code") != 200:
+        msg = str(body.get("message") or body.get("msg") or "API error")
+        return False, msg, {}
+
+    data = body.get("data")
+    if not isinstance(data, dict):
+        return False, "Unexpected API response structure", {}
+
+    return True, "OK", data

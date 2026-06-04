@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+import logging
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QKeySequence, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -89,33 +90,33 @@ class QRCodeDialog(QDialog):
 
         ok, msg, qr_data = get_qrcode_image(course_id=self.course_id)
 
-        print(f"[QRCode] 生成结果: ok={ok}, msg={msg}, 数据大小={len(qr_data)}")
+        logging.debug("[QRCode] 生成结果: ok=%s, msg=%s, 数据大小=%s", ok, msg, len(qr_data))
 
         if not ok:
             error_msg = f"生成失败: {msg}"
             self.qr_label.setText(error_msg)
-            print(f"[QRCode] {error_msg}")
+            logging.debug("[QRCode] %s", error_msg)
             return
 
         if not qr_data:
             self.qr_label.setText("二维码数据为空")
-            print("[QRCode] 二维码数据为空")
+            logging.debug("[QRCode] 二维码数据为空")
             return
 
         try:
             pixmap = QPixmap()
             loaded = pixmap.loadFromData(qr_data)
-            print(f"[QRCode] QPixmap 加载结果: {loaded}, 原始大小: {pixmap.width()}x{pixmap.height()}")
+            logging.debug("[QRCode] QPixmap 加载结果: %s, 原始大小: %sx%s", loaded, pixmap.width(), pixmap.height())
 
             if not loaded or pixmap.isNull():
                 self.qr_label.setText("无法加载二维码图像")
-                print("[QRCode] 无法加载二维码图像")
+                logging.debug("[QRCode] 无法加载二维码图像")
                 return
 
             composed = self._build_annotated_qrcode(pixmap)
             if composed.isNull():
                 self.qr_label.setText("无法生成带标注的二维码")
-                print("[QRCode] 无法生成带标注的二维码")
+                logging.debug("[QRCode] 无法生成带标注的二维码")
                 return
 
             self._composed_pixmap = composed
@@ -123,14 +124,11 @@ class QRCodeDialog(QDialog):
             self._refresh_preview_pixmap()
 
             self.qr_label.setText("")
-            print("[QRCode] 二维码已显示")
+            logging.debug("[QRCode] 二维码已显示")
         except Exception as exc:  # noqa: BLE001
             error_msg = f"显示二维码失败: {exc}"
             self.qr_label.setText(error_msg)
-            print(f"[QRCode] {error_msg}")
-            import traceback
-
-            traceback.print_exc()
+            logging.debug("[QRCode] %s", error_msg, exc_info=True)
 
     def resizeEvent(self, event) -> None:  # noqa: ANN001
         super().resizeEvent(event)
@@ -269,7 +267,7 @@ class QRCodeDialog(QDialog):
 
         try:
             QApplication.clipboard().setPixmap(self._composed_pixmap)
-            QMessageBox.information(self, "提示", "二维码图片已复制到剪贴板")
+            QTimer.singleShot(200, self.accept)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.warning(self, "错误", f"复制二维码图片失败: {exc}")
 
@@ -290,6 +288,6 @@ class QRCodeDialog(QDialog):
             return
 
         if self._composed_pixmap.save(file_path):
-            QMessageBox.information(self, "提示", f"已保存到: {file_path}")
+            QTimer.singleShot(200, self.accept)
         else:
             QMessageBox.warning(self, "错误", "保存二维码图片失败")

@@ -16,7 +16,7 @@ class AppConfig:
     gist_id: str = ""
     gist_filename: str = "bit_cookies.json"
     tencent_map_key: str = ""
-    tls_insecure: bool = True
+    tls_insecure: bool = False
     signup_queue_text: str = ""
     whitelist_category_ids: str = ""
     whitelist_grade: str = ""
@@ -89,7 +89,7 @@ def load_config() -> AppConfig:
         gist_id=str(env.get("bit_sc_gist_id", "")),
         gist_filename=str(env.get("bit_sc_gist_filename", "bit_cookies.json")) or "bit_cookies.json",
         tencent_map_key=str(env.get("bit_sc_tencent_map_key", "")),
-        tls_insecure=_bool_from_str(env.get("bit_sc_tls_insecure", "true")),
+        tls_insecure=_bool_from_str(env.get("bit_sc_tls_insecure", "false")),
         signup_queue_text=_normalize_signup_queue_text(env.get("bit_sc_signup_list", "")),
         whitelist_category_ids=str(env.get("bit_sc_whitelist_category_ids", "")),
         whitelist_grade=str(env.get("bit_sc_whitelist_grade", "")),

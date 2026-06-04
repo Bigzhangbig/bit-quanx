@@ -16,5 +16,8 @@ class Worker(QRunnable):
         self.signals = WorkerSignals()
 
     def run(self):
-        result = self.fn(*self.args, **self.kwargs)
+        try:
+            result = self.fn(*self.args, **self.kwargs)
+        except Exception as exc:  # noqa: BLE001
+            result = (False, f"Worker exception: {exc}", {})
         self.signals.done.emit(result)

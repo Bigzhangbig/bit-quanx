@@ -527,64 +527,92 @@ def is_event_ended(event: CalendarEvent, now: datetime | None = None) -> bool:
     return False
 
 
+def summarize_event_day_completion(
+    events: list[CalendarEvent],
+    now: datetime | None = None,
+) -> dict[tuple[int, int, int], bool]:
+    """按日期汇总活动是否已全部结束。"""
+    summary: dict[tuple[int, int, int], bool] = {}
+
+    for event in events:
+        if not event.start_time:
+            continue
+
+        date_key = (
+            event.start_time.year,
+            event.start_time.month,
+            event.start_time.day,
+        )
+        ended = is_event_ended(event, now=now)
+        if date_key in summary:
+            summary[date_key] = summary[date_key] and ended
+        else:
+            summary[date_key] = ended
+
+    return summary
+
+
+def _parse_course_to_event(
+    course: dict[str, Any],
+    *,
+    is_enrolled: bool,
+    default_duration: str = "",
+) -> CalendarEvent | None:
+    """将单个课程 dict 转为 CalendarEvent。返回 None 表示跳过。"""
+    course_id = course.get("id") or course.get("course_id")
+    title = course.get("title") or course.get("course_title", "未命名活动")
+
+    start_time, end_time = calculate_event_time(course)
+    if not start_time:
+        return None
+
+    address = ""
+    sign_in_address = course.get("sign_in_address", [])
+    if isinstance(sign_in_address, list) and sign_in_address and isinstance(sign_in_address[0], dict):
+        address = sign_in_address[0].get("address", "")
+
+    time_place = _extract_time_place_source(course)
+    display_location = build_display_location(time_place, address)
+
+    category = ""
+    transcript_index = course.get("transcript_index", {})
+    if isinstance(transcript_index, dict):
+        category = transcript_index.get("transcript_name", "")
+
+    duration = default_duration or str(course.get("duration", ""))
+
+    return CalendarEvent(
+        id=int(course_id) if course_id else 0,
+        title=title,
+        start_time=start_time,
+        end_time=end_time,
+        location=display_location,
+        address=address,
+        category=category,
+        duration=duration,
+        score="",
+        contact_name="",
+        contact_phone="",
+        is_enrolled=is_enrolled,
+        sign_in_start_time=course.get("sign_in_start_time", ""),
+        sign_in_end_time=course.get("sign_in_end_time", ""),
+        sign_out_start_time=course.get("sign_out_start_time", ""),
+        sign_out_end_time=course.get("sign_out_end_time", ""),
+        time_place=time_place,
+    )
+
+
 def parse_event_from_list_my_courses(
     courses: list[dict[str, Any]],
 ) -> list[CalendarEvent]:
     """将list_my_courses()返回的活动转为CalendarEvent列表。"""
     events = []
-    
     for course in courses:
         if not isinstance(course, dict):
             continue
-        
-        course_id = course.get("id") or course.get("course_id")
-        title = course.get("title") or course.get("course_title", "未命名活动")
-        
-        start_time, end_time = calculate_event_time(course)
-        
-        # 无有效时间则跳过
-        if not start_time:
-            continue
-        
-        # 提取地址（可能是数组）
-        address = ""
-        sign_in_address = course.get("sign_in_address", [])
-        if isinstance(sign_in_address, list) and sign_in_address:
-            address = sign_in_address[0].get("address", "")
-
-        time_place = _extract_time_place_source(course)
-        display_location = build_display_location(time_place, address)
-        
-        # 提取类别
-        category = ""
-        transcript_index = course.get("transcript_index", {})
-        if isinstance(transcript_index, dict):
-            category = transcript_index.get("transcript_name", "")
-        
-        # 提取时长
-        duration = course.get("duration", "")
-        
-        event = CalendarEvent(
-            id=int(course_id) if course_id else 0,
-            title=title,
-            start_time=start_time,
-            end_time=end_time,
-            location=display_location,
-            address=address,
-            category=category,
-            duration=duration,
-            score="",  # list_my_courses不含积分信息
-            contact_name="",
-            contact_phone="",
-            is_enrolled=True,
-            sign_in_start_time=course.get("sign_in_start_time", ""),
-            sign_in_end_time=course.get("sign_in_end_time", ""),
-            sign_out_start_time=course.get("sign_out_start_time", ""),
-            sign_out_end_time=course.get("sign_out_end_time", ""),
-            time_place=time_place,
-        )
-        events.append(event)
-    
+        event = _parse_course_to_event(course, is_enrolled=True)
+        if event is not None:
+            events.append(event)
     return events
 
 
@@ -593,56 +621,12 @@ def parse_event_from_list_courses(
 ) -> list[CalendarEvent]:
     """将list_courses()返回的未报名活动转为CalendarEvent列表。"""
     events = []
-    
     for course in courses:
         if not isinstance(course, dict):
             continue
-        
-        course_id = course.get("id") or course.get("course_id")
-        title = course.get("title", "未命名活动")
-        
-        start_time, end_time = calculate_event_time(course)
-        
-        # 无有效时间则跳过
-        if not start_time:
-            continue
-        
-        # 提取类别
-        category = ""
-        transcript_index = course.get("transcript_index", {})
-        if isinstance(transcript_index, dict):
-            category = transcript_index.get("transcript_name", "")
-
-        # 提取地址（尽量保留原始打卡地点，供 ICS 导出补充第二行）
-        address = ""
-        sign_in_address = course.get("sign_in_address", [])
-        if isinstance(sign_in_address, list) and sign_in_address:
-            address = sign_in_address[0].get("address", "")
-
-        time_place = _extract_time_place_source(course)
-        display_location = build_display_location(time_place, address)
-        
-        event = CalendarEvent(
-            id=int(course_id) if course_id else 0,
-            title=title,
-            start_time=start_time,
-            end_time=end_time,
-            location=display_location,
-            address=address,
-            category=category,
-            duration="",
-            score="",
-            contact_name="",
-            contact_phone="",
-            is_enrolled=False,
-            sign_in_start_time=course.get("sign_in_start_time", ""),
-            sign_in_end_time=course.get("sign_in_end_time", ""),
-            sign_out_start_time=course.get("sign_out_start_time", ""),
-            sign_out_end_time=course.get("sign_out_end_time", ""),
-            time_place=time_place,
-        )
-        events.append(event)
-    
+        event = _parse_course_to_event(course, is_enrolled=False)
+        if event is not None:
+            events.append(event)
     return events
 
 
@@ -656,7 +640,7 @@ def enrich_event_with_detail(
         event.location = detail["location"]
     
     sign_in_address = detail.get("sign_in_address", [])
-    if isinstance(sign_in_address, list) and sign_in_address:
+    if isinstance(sign_in_address, list) and sign_in_address and isinstance(sign_in_address[0], dict):
         event.address = sign_in_address[0].get("address", event.address)
 
     time_place = _extract_time_place_source(detail) or event.time_place or ""

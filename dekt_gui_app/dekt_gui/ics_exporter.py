@@ -1,6 +1,7 @@
 """ICS日历文件导出工具。"""
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from html import unescape
 import re
@@ -185,5 +186,5 @@ def export_events_to_ics_file(
             f.write(content)
         return True
     except Exception as e:
-        print(f"导出ICS文件失败: {e}")
+        logging.debug("导出ICS文件失败: %s", e, exc_info=True)
         return False

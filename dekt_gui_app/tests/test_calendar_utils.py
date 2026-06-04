@@ -12,6 +12,7 @@ from dekt_gui.calendar_utils import (
     normalize_display_text,
     parse_event_from_list_my_courses,
     parse_datetime,
+    summarize_event_day_completion,
 )
 
 
@@ -298,3 +299,31 @@ def test_is_event_ended_by_sign_out_end_time() -> None:
 
     assert is_event_ended(event, now=datetime(2026, 3, 28, 9, 31)) is True
     assert is_event_ended(event, now=datetime(2026, 3, 28, 9, 29)) is False
+
+
+def test_summarize_event_day_completion_marks_mixed_day_as_not_completed() -> None:
+    events = [
+        CalendarEvent(
+            id=1,
+            title="已结束活动",
+            start_time=datetime(2026, 3, 28, 8, 20),
+            sign_out_end_time="2026-03-28 09:00:00",
+        ),
+        CalendarEvent(
+            id=2,
+            title="未结束活动",
+            start_time=datetime(2026, 3, 28, 10, 0),
+            sign_out_end_time="2026-03-29 12:00:00",
+        ),
+        CalendarEvent(
+            id=3,
+            title="另一日已结束活动",
+            start_time=datetime(2026, 3, 29, 8, 20),
+            sign_out_end_time="2026-03-29 09:00:00",
+        ),
+    ]
+
+    completion = summarize_event_day_completion(events, now=datetime(2026, 3, 29, 10, 0))
+
+    assert completion[(2026, 3, 28)] is False
+    assert completion[(2026, 3, 29)] is True
