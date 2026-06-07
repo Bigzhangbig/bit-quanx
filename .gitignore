@@ -4,6 +4,16 @@ env.json
 .venv/
 .vscode/
 
+# AI assistant configs (Claude / Gemini / Copilot / Cursor)
+.claude/
+CLAUDE.md
+GEMINI.md
+copilot-instructions.md
+.github/copilot-instructions.md
+AGENTS.md
+.cursor/
+.aider*
+
 # Dependencies
 node_modules/
 __pycache__/
@@ -29,3 +39,8 @@ Thumbs.db
 dekt_gui_app/build/
 dekt_gui_app/dist/
 dekt_gui_app/*.spec
+.pytest_cache/
+
+# Local capture / debug dumps
+*.chlz
+dekt_gui_app/tests/_raw_target_*.json
