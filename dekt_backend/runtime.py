@@ -6,9 +6,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from dekt_gui_app.dekt_gui.api_client import list_courses, list_my_courses
+from dekt_gui.api_client import get_qrcode_url, list_courses, list_my_courses
 
-from .qrcode_utils import build_course_qrcode_url
 from .settings import settings
 from .storage import load_backend_config
 
@@ -138,7 +137,7 @@ class BackendRuntime:
                         raw_id = course.get("id") or course.get("course_id") or 0
                         target_bucket.append({
                             "course": course,
-                            "qrcode_url": build_course_qrcode_url(int(raw_id)),
+                            "qrcode_url": get_qrcode_url(int(raw_id)),
                         })
 
                 if settings.runtime_fetch_delay_max_seconds > 0:

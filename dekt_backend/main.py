@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import os
 import secrets
-import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -14,10 +12,6 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from .runtime import runtime
 from .settings import settings
 from .storage import load_backend_config
-
-dekt_gui_path = Path(__file__).parent.parent / "dekt_gui_app"
-if str(dekt_gui_path) not in sys.path:
-    sys.path.insert(0, str(dekt_gui_path))
 
 try:
     from dekt_gui.api_client import list_courses, list_my_courses, normalize_bearer_token
