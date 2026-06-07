@@ -1,0 +1,74 @@
+name: Package GUI App (Multi-platform)
+
+on:
+  push:
+    paths:
+      - "dekt_gui_app/**"
+      - "pyproject.toml"
+      - ".github/workflows/package-gui.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            suffix: .exe
+            asset_name: DEKT-GUI-windows.zip
+          - os: macos-latest
+            suffix: ""
+            asset_name: DEKT-GUI-macos.zip
+          - os: ubuntu-latest
+            suffix: ""
+            asset_name: DEKT-GUI-linux.zip
+
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: |
+          uv sync --extra gui
+          uv pip install pyinstaller
+
+      - name: Build with PyInstaller
+        shell: bash
+        run: |
+          # Use --onefile for single file
+          # Use --windowed to hide terminal on Windows/macOS
+          # Use --add-data to include BIT.png (using : as separator, PyInstaller handles platform conversion)
+          uv run pyinstaller --noconfirm --onefile --windowed \
+            --name "DEKT-GUI" \
+            --add-data "BIT.png:." \
+            --paths "dekt_gui_app" \
+            "dekt_gui_app/main.py"
+
+      - name: Post-process (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/DEKT-GUI.exe -DestinationPath dist/${{ matrix.asset_name }}
+
+      - name: Post-process (Non-Windows)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          cd dist
+          zip -j ${{ matrix.asset_name }} DEKT-GUI
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: dist/${{ matrix.asset_name }}
